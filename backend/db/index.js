@@ -101,6 +101,23 @@ function ouvrirEspace(fichier) {
     reponses TEXT NOT NULL, resultat TEXT NOT NULL, score INTEGER NOT NULL, gravite TEXT NOT NULL,
     remise_utilisee_le TEXT, commande_id TEXT, cree_le TEXT NOT NULL);
     CREATE INDEX IF NOT EXISTS idx_diagnostics_date ON diagnostics(cree_le);`);
+  // MILANA : formations (leçons, évaluation, inscriptions avec lien d'accès personnel)
+  db.exec(`CREATE TABLE IF NOT EXISTS formations (
+    id TEXT PRIMARY KEY, titre TEXT NOT NULL, description TEXT, categorie TEXT, duree TEXT, image TEXT,
+    prix REAL NOT NULL DEFAULT 0, publie INTEGER NOT NULL DEFAULT 1,
+    support_fichier TEXT, support_nom TEXT, support_lien TEXT,
+    minuteur INTEGER, score_reussite INTEGER NOT NULL DEFAULT 60, tentatives_max INTEGER NOT NULL DEFAULT 3, cree_le TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS formations_lecons (
+      id TEXT PRIMARY KEY, formation_id TEXT NOT NULL, position INTEGER NOT NULL, titre TEXT NOT NULL, contenu TEXT, video_url TEXT);
+    CREATE TABLE IF NOT EXISTS formations_questions (
+      id TEXT PRIMARY KEY, formation_id TEXT NOT NULL, position INTEGER NOT NULL, question TEXT NOT NULL, options TEXT NOT NULL, bonne INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS formations_inscriptions (
+      id TEXT PRIMARY KEY, formation_id TEXT NOT NULL, client_id TEXT, jeton TEXT NOT NULL UNIQUE, nom TEXT NOT NULL, telephone TEXT NOT NULL,
+      statut TEXT NOT NULL,              -- gratuit | a_verifier (paiement déclaré) | payee | refusee
+      montant REAL NOT NULL DEFAULT 0, operateur TEXT, telephone_paiement TEXT, reference_paiement TEXT,
+      lecons_faites INTEGER NOT NULL DEFAULT 0, tentatives INTEGER NOT NULL DEFAULT 0, meilleur_score INTEGER, dernier_score INTEGER,
+      quiz_debut TEXT, reussi_le TEXT, code_certificat TEXT, cree_le TEXT NOT NULL, maj_le TEXT NOT NULL);
+    CREATE INDEX IF NOT EXISTS idx_formations_inscriptions ON formations_inscriptions(formation_id);`);
   // Retours d'articles après la vente (rétractation ou échange)
   db.exec(`CREATE TABLE IF NOT EXISTS retours (
     id TEXT PRIMARY KEY, commande_id TEXT NOT NULL, pack_id TEXT NOT NULL, quantite INTEGER NOT NULL,

@@ -1197,6 +1197,7 @@ const NAV = [
   { key: "stocks", label: "Stocks", icon: Boxes, admin: true, badge: (d) => d.packs.filter((p) => p.actif !== false && p.stock <= seuilDe(p)).length },
   { key: "clients", label: "Clients", icon: Users, admin: true },
   { key: "diagnostics", label: "Diagnostics", icon: Sparkles, admin: true },
+  { key: "formations", label: "Formations", icon: FileText, admin: true },
   { key: "depenses", label: "Dépenses", icon: Wallet },
   { key: "ventes", label: "Ventes", icon: Receipt },
   { key: "tickets", label: "Tickets de caisse", icon: FileText, badge: (d) => d.commandes.filter((c) => c.statut !== "annulee" && !c.ticketRemisLe).length },
@@ -2651,6 +2652,216 @@ function PageDiagnostics() {
             <div><div className="cell-sub">Réponses du client</div>
               <div className="form-grid">{Object.entries(LIBELLES_DIAG).map(([k, l]) => <div key={k}><div className="cell-sub">{l}</div><div>{[].concat(detail.reponses[k] ?? "—").join(", ").replace(/_/g, " ")}</div></div>)}</div>
             </div>
+          </div>
+        )}
+      </Modal>
+    </>
+  );
+}
+
+/* =====================================================================
+   PAGE : Formations (administrateur) — catalogue, leçons, évaluation, inscriptions
+   ===================================================================== */
+const STATUTS_INSCRIPTION = { gratuit: ["Gratuite", "info"], a_verifier: ["Paiement à vérifier", "warning"], payee: ["Payée", "success"], refusee: ["Paiement refusé", "critical"] };
+const FORMATION_VIDE = { titre: "", description: "", categorie: "", duree: "", prix: "", publie: true, support_lien: "", minuteur: "", score_reussite: 60, tentatives_max: 3, lecons: [], questions: [] };
+
+function FormationModal({ formation, onClose, onSaved }) {
+  const { toast, confirm } = useApp();
+  const [f, setF] = useState(FORMATION_VIDE);
+  const [onglet, setOnglet] = useState("infos");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  useEffect(() => { if (formation) { setF({ ...FORMATION_VIDE, ...formation, prix: formation.prix || "", minuteur: formation.minuteur || "", lecons: formation.lecons || [], questions: formation.questions || [] }); setOnglet("infos"); setErr(""); setBusy(false); } }, [formation]);
+  const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
+  const majListe = (cle, n, champs) => setF((s) => ({ ...s, [cle]: s[cle].map((x, i) => (i === n ? { ...x, ...champs } : x)) }));
+  const retirer = (cle, n) => setF((s) => ({ ...s, [cle]: s[cle].filter((_, i) => i !== n) }));
+  const monter = (cle, n) => setF((s) => { const l = [...s[cle]]; if (n > 0) [l[n - 1], l[n]] = [l[n], l[n - 1]]; return { ...s, [cle]: l }; });
+  const nouvelle = !formation?.id;
+  const enregistrer = async () => {
+    setBusy(true); setErr("");
+    try {
+      const corps = { ...f, prix: Number(f.prix) || 0, minuteur: f.minuteur === "" ? null : Number(f.minuteur) };
+      onSaved(nouvelle ? await apiFetch("POST", "/api/formations", corps) : await apiFetch("PUT", "/api/formations/" + formation.id, corps));
+      toast({ title: nouvelle ? "Formation créée" : "Formation enregistrée", desc: f.titre });
+      onClose();
+    } catch (e) { setErr(e.message); setBusy(false); }
+  };
+  const supprimer = async () => {
+    if (!(await confirm({ title: `Supprimer « ${formation.titre} » ?`, message: "Ses leçons et son évaluation seront effacées.", confirmLabel: "Supprimer", tone: "critical" }))) return;
+    try { onSaved(await apiFetch("DELETE", "/api/formations/" + formation.id)); toast({ title: "Formation supprimée" }); onClose(); } catch (e) { setErr(e.message); }
+  };
+  return (
+    <Modal open={!!formation} onClose={onClose} title={nouvelle ? "Nouvelle formation" : "Modifier la formation"} size="lg"
+      footer={<>{!nouvelle && <Btn variant="critical-plain" icon={Trash2} onClick={supprimer} className="spacer">Supprimer</Btn>}<Btn onClick={onClose}>Annuler</Btn><Btn variant="primary" icon={Check} loading={busy} onClick={enregistrer}>Enregistrer</Btn></>}>
+      <div className="stack">
+        <Segmented full value={onglet} onChange={setOnglet} options={[{ value: "infos", label: "Présentation" }, { value: "lecons", label: `Leçons (${f.lecons.length})` }, { value: "eval", label: `Évaluation (${f.questions.length})` }]} />
+        {err && <div className="banner banner-critical"><AlertTriangle size={16} /><div>{err}</div></div>}
+
+        {onglet === "infos" && (
+          <>
+            <Field label="Titre"><Input value={f.titre} onChange={(e) => set("titre", e.target.value)} placeholder="Ex : Routine hydratation pour cheveux secs" autoFocus /></Field>
+            <Field label="Description" optional><textarea className="textarea" rows={3} value={f.description} onChange={(e) => set("description", e.target.value)} placeholder="Ce que la personne va apprendre." /></Field>
+            <div className="form-grid">
+              <Field label="Prix" help="Vide ou 0 : formation gratuite, ouverte dès l'inscription."><Input value={f.prix} onChange={(e) => set("prix", e.target.value.replace(/[^\d]/g, ""))} suffix="FCFA" inputMode="numeric" placeholder="Gratuite" /></Field>
+              <Field label="Catégorie" optional><Input value={f.categorie} onChange={(e) => set("categorie", e.target.value)} placeholder="Ex : Bases" /></Field>
+              <Field label="Durée affichée" optional><Input value={f.duree} onChange={(e) => set("duree", e.target.value)} placeholder="Ex : 20 min" /></Field>
+              <Field label="Support complémentaire" optional help="Lien https vers un PDF ou une vidéo, donné aux inscrits."><Input value={f.support_lien} onChange={(e) => set("support_lien", e.target.value)} placeholder="https://…" /></Field>
+            </div>
+            {formation?.support_nom && <div className="cell-sub">Fiche PDF fournie avec la plateforme : {formation.support_nom}</div>}
+            <div className="row" style={{ gap: 10 }}><Switch on={f.publie} onChange={(v) => set("publie", v)} label="Publiée" /><span>{f.publie ? "Publiée : visible dans le catalogue" : "Brouillon : cachée du catalogue, les inscrits gardent leur accès"}</span></div>
+          </>
+        )}
+
+        {onglet === "lecons" && (
+          <>
+            <div className="cell-sub">Les leçons se suivent dans l'ordre. Dans le texte : une ligne vide sépare deux paragraphes, **deux étoiles** mettent en gras, un tiret en début de ligne fait une liste.</div>
+            {f.lecons.map((l, n) => (
+              <div className="card" key={n} style={{ padding: 14 }}>
+                <div className="row" style={{ gap: 8, marginBottom: 8 }}><Badge>Leçon {n + 1}</Badge><span className="spacer" />{n > 0 && <Btn size="sm" onClick={() => monter("lecons", n)}>Monter</Btn>}<button className="icon-btn danger" onClick={() => retirer("lecons", n)} aria-label="Retirer la leçon"><Trash2 size={15} /></button></div>
+                <div className="stack">
+                  <Input value={l.titre} onChange={(e) => majListe("lecons", n, { titre: e.target.value })} placeholder="Titre de la leçon" />
+                  <textarea className="textarea" rows={6} value={l.contenu} onChange={(e) => majListe("lecons", n, { contenu: e.target.value })} placeholder="Texte de la leçon" />
+                  <Input value={l.video_url || ""} onChange={(e) => majListe("lecons", n, { video_url: e.target.value })} placeholder="Lien d'une vidéo (facultatif) : https://…" />
+                </div>
+              </div>
+            ))}
+            <Btn icon={Plus} onClick={() => set("lecons", [...f.lecons, { titre: "", contenu: "", video_url: "" }])}>Ajouter une leçon</Btn>
+          </>
+        )}
+
+        {onglet === "eval" && (
+          <>
+            <div className="cell-sub">Sans question, la formation n'a ni évaluation ni certificat. Cochez la bonne réponse de chaque question : elle n'est jamais montrée aux apprenants.</div>
+            <div className="form-grid">
+              <Field label="Score pour réussir"><Input value={f.score_reussite} onChange={(e) => set("score_reussite", e.target.value.replace(/[^\d]/g, ""))} suffix="%" inputMode="numeric" /></Field>
+              <Field label="Tentatives autorisées"><Input value={f.tentatives_max} onChange={(e) => set("tentatives_max", e.target.value.replace(/[^\d]/g, ""))} inputMode="numeric" /></Field>
+              <Field label="Durée de l'évaluation" help="Vide : 1 minute par question."><Input value={f.minuteur} onChange={(e) => set("minuteur", e.target.value.replace(/[^\d]/g, ""))} suffix="secondes" inputMode="numeric" /></Field>
+            </div>
+            {f.questions.map((q, n) => (
+              <div className="card" key={n} style={{ padding: 14 }}>
+                <div className="row" style={{ gap: 8, marginBottom: 8 }}><Badge>Question {n + 1}</Badge><span className="spacer" /><button className="icon-btn danger" onClick={() => retirer("questions", n)} aria-label="Retirer la question"><Trash2 size={15} /></button></div>
+                <div className="stack">
+                  <Input value={q.question} onChange={(e) => majListe("questions", n, { question: e.target.value })} placeholder="Énoncé de la question" />
+                  {[0, 1, 2, 3].map((k) => (
+                    <div className="row" key={k} style={{ gap: 8 }}>
+                      <input type="radio" name={"bonne-" + n} checked={q.bonne === k} onChange={() => majListe("questions", n, { bonne: k })} aria-label={`Réponse ${k + 1} : bonne réponse`} disabled={!(q.options[k] || "").trim()} />
+                      <div className="grow"><Input value={q.options[k] || ""} onChange={(e) => { const o = [0, 1, 2, 3].map((x) => q.options[x] || ""); o[k] = e.target.value; majListe("questions", n, { options: o }); }} placeholder={`Réponse ${k + 1}${k > 1 ? " (facultative)" : ""}`} /></div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+            <Btn icon={Plus} onClick={() => set("questions", [...f.questions, { question: "", options: ["", "", "", ""], bonne: 0 }])}>Ajouter une question</Btn>
+          </>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+function PageFormations() {
+  const { mode, toast, confirm } = useApp();
+  const [t, setT] = useState(null);
+  const [vue, setVue] = useState("formations");
+  const [edition, setEdition] = useState(null);
+  const [offre, setOffre] = useState(null); // { formation_id, nom, telephone }
+  const [busy, setBusy] = useState("");
+  useEffect(() => { if (mode === "api") apiFetch("GET", "/api/formations").then(setT).catch((e) => { setT({ formations: [], inscriptions: [] }); toast({ title: "Formations indisponibles", desc: e.message, tone: "critical" }); }); }, [mode]);
+  if (mode !== "api") return <><PageHeader title="Formations" /><Card><EmptyState icon={FileText} title="Disponible avec le serveur" /></Card></>;
+  if (!t) return <><PageHeader title="Formations" /><Card><div className="pdf-attente"><span className="spinner" />Chargement…</div></Card></>;
+
+  const aVerifier = t.inscriptions.filter((i) => i.statut === "a_verifier");
+  const encaisse = t.inscriptions.filter((i) => i.statut === "payee").reduce((s, i) => s + i.montant, 0);
+  const lienAcces = (i) => `${location.origin}/#/formation/${i.jeton}`;
+  const copier = (i) => navigator.clipboard?.writeText(lienAcces(i)).then(() => toast({ title: "Lien d'accès copié", desc: i.nom }), () => toast({ title: "Copie impossible", tone: "critical" }));
+  const paiement = async (i, recu) => {
+    if (!(await confirm({ title: recu ? `Paiement de ${i.nom} reçu ?` : `Refuser le paiement de ${i.nom} ?`, message: recu ? `${fmt(i.montant)} par ${i.operateur}, référence ${i.reference_paiement}. Vérifiez d'abord sur votre téléphone : l'accès à la formation s'ouvre tout de suite.` : "La personne verra que son paiement n'a pas été retrouvé.", confirmLabel: recu ? "Paiement reçu" : "Refuser", tone: recu ? undefined : "critical" }))) return;
+    setBusy(i.id);
+    try { setT(await apiFetch("POST", `/api/formations/inscriptions/${i.id}/paiement`, { recu })); toast({ title: recu ? "Accès ouvert" : "Paiement refusé", desc: i.nom }); }
+    catch (e) { toast({ title: "Action impossible", desc: e.message, tone: "critical" }); }
+    finally { setBusy(""); }
+  };
+  const offrir = async () => {
+    setBusy("offre");
+    try {
+      const r = await apiFetch("POST", "/api/formations/inscriptions", offre);
+      setT({ formations: r.formations, inscriptions: r.inscriptions });
+      const lien = `${location.origin}/#/formation/${r.jeton}`;
+      navigator.clipboard?.writeText(lien).catch(() => {});
+      toast({ title: "Accès créé, lien copié", desc: "Envoyez-le à " + offre.nom });
+      setOffre(null); setVue("inscriptions");
+    } catch (e) { toast({ title: "Création impossible", desc: e.message, tone: "critical" }); }
+    finally { setBusy(""); }
+  };
+
+  return (
+    <>
+      <PageHeader title="Formations" meta="Vos formations, leurs leçons, et les personnes inscrites"
+        actions={<><Btn icon={UserPlus} onClick={() => setOffre({ formation_id: t.formations[0]?.id || "", nom: "", telephone: "" })} disabled={!t.formations.length}>Donner un accès</Btn><Btn variant="primary" icon={Plus} onClick={() => setEdition({})}>Nouvelle formation</Btn></>} />
+      {aVerifier.length > 0 && <div className="banner banner-warning" style={{ marginBottom: 16 }}><AlertTriangle size={16} /><div className="grow"><b>{aVerifier.length} paiement{aVerifier.length > 1 ? "s" : ""} à vérifier.</b> Contrôlez la référence sur votre téléphone, puis ouvrez l'accès.</div><Btn size="sm" variant="primary" onClick={() => setVue("inscriptions")}>Voir</Btn></div>}
+      <div className="kpi-grid kpi-3 stagger">
+        {[["Formations publiées", t.formations.filter((f) => f.publie).length, fmtNum], ["Personnes inscrites", t.inscriptions.filter((i) => i.statut === "gratuit" || i.statut === "payee").length, fmtNum], ["Encaissé (formations payées)", encaisse, fmt]].map(([l, v, f], i) => (
+          <div className="card kpi" key={l} style={{ "--i": i }}><div className="kpi-label"><span className="kpi-dot tint-1"><FileText size={13} /></span>{l}</div><div className="kpi-value"><CountUp value={v} format={f} /></div></div>
+        ))}
+      </div>
+      <div style={{ margin: "4px 0 14px" }}><Segmented value={vue} onChange={setVue} options={[{ value: "formations", label: `Formations (${t.formations.length})` }, { value: "inscriptions", label: `Inscriptions (${t.inscriptions.length})` }]} /></div>
+
+      {vue === "formations" ? (
+        <Card title="Catalogue" padded={false}>
+          <div style={{ height: 12 }} />
+          {t.formations.length === 0 ? <EmptyState icon={FileText} title="Aucune formation" action={<Btn variant="primary" icon={Plus} onClick={() => setEdition({})}>Nouvelle formation</Btn>}>Créez votre première formation : un titre, quelques leçons, une évaluation.</EmptyState> : (
+            <div className="table-scroll"><table className="table">
+              <thead><tr><th>Formation</th><th className="hide-sm">Contenu</th><th className="right">Prix</th><th className="right hide-sm">Inscrits</th><th>État</th><th /></tr></thead>
+              <tbody>{t.formations.map((f, i) => (
+                <tr key={f.id} style={{ "--i": Math.min(i, 20), cursor: "pointer" }} onClick={() => setEdition(f)}>
+                  <td className="wrap"><div className="cell-main">{f.titre}</div><div className="cell-sub">{f.categorie || "Sans catégorie"}{f.duree ? " · " + f.duree : ""}</div></td>
+                  <td className="hide-sm muted">{f.lecons.length} leçon{f.lecons.length > 1 ? "s" : ""} · {f.questions.length ? f.questions.length + " questions" : "sans évaluation"}</td>
+                  <td className="right num strong">{f.prix > 0 ? fmt(f.prix) : "Gratuite"}</td>
+                  <td className="right num hide-sm">{f.inscrits}</td>
+                  <td>{f.publie ? <Badge tone="success" dot>Publiée</Badge> : <Badge>Brouillon</Badge>}</td>
+                  <td className="right"><button className="icon-btn" aria-label="Modifier"><Pencil size={15} /></button></td>
+                </tr>
+              ))}</tbody>
+            </table></div>
+          )}
+        </Card>
+      ) : (
+        <Card title="Personnes inscrites" padded={false}>
+          <div style={{ height: 12 }} />
+          {t.inscriptions.length === 0 ? <EmptyState icon={Users} title="Aucune inscription">Les inscriptions faites sur la boutique apparaissent ici.</EmptyState> : (
+            <div className="table-scroll"><table className="table">
+              <thead><tr><th>Date</th><th>Personne</th><th className="hide-sm">Formation</th><th>Paiement</th><th className="hide-sm">Avancement</th><th /></tr></thead>
+              <tbody>{t.inscriptions.map((i, n) => {
+                const [libelle, ton] = STATUTS_INSCRIPTION[i.statut] || [i.statut, undefined];
+                return (
+                  <tr key={i.id} style={{ "--i": Math.min(n, 20) }}>
+                    <td>{fmtDateCourt(i.cree_le)}</td>
+                    <td className="wrap"><div className="cell-main">{i.nom}</div><div className="cell-sub">{i.telephone}</div></td>
+                    <td className="hide-sm wrap muted">{i.formation}</td>
+                    <td className="wrap"><Badge tone={ton} dot>{libelle}</Badge>{i.reference_paiement && <div className="cell-sub">{fmt(i.montant)} · {i.operateur} · réf. {i.reference_paiement}</div>}</td>
+                    <td className="hide-sm">{i.certificat ? <Badge tone="success">Certifié · {i.meilleur_score} %</Badge> : <span className="muted">{i.lecons_faites} / {i.lecons} leçons{i.tentatives ? ` · ${i.tentatives} essai${i.tentatives > 1 ? "s" : ""}` : ""}</span>}</td>
+                    <td className="right"><div className="row" style={{ gap: 6, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                      {i.statut === "a_verifier" && <><Btn size="sm" variant="primary" icon={Check} loading={busy === i.id} onClick={() => paiement(i, true)}>Reçu</Btn><Btn size="sm" onClick={() => paiement(i, false)}>Refuser</Btn></>}
+                      {i.statut === "refusee" && <Btn size="sm" onClick={() => paiement(i, true)}>Finalement reçu</Btn>}
+                      <button className="icon-btn" onClick={() => copier(i)} aria-label="Copier le lien d'accès" title="Copier le lien d'accès"><Copy size={15} /></button>
+                    </div></td>
+                  </tr>
+                );
+              })}</tbody>
+            </table></div>
+          )}
+        </Card>
+      )}
+
+      <FormationModal formation={edition} onClose={() => setEdition(null)} onSaved={setT} />
+      <Modal open={!!offre} onClose={() => setOffre(null)} title="Donner un accès à une formation"
+        footer={<><Btn onClick={() => setOffre(null)}>Annuler</Btn><Btn variant="primary" icon={Check} loading={busy === "offre"} onClick={offrir}>Créer l'accès</Btn></>}>
+        {offre && (
+          <div className="stack">
+            <div className="cell-sub">Pour une personne qui a payé en boutique, ou à qui vous offrez la formation. Vous recevez un lien à lui envoyer.</div>
+            <Field label="Formation"><Select value={offre.formation_id} onChange={(e) => setOffre({ ...offre, formation_id: e.target.value })}>{t.formations.map((f) => <option key={f.id} value={f.id}>{f.titre}</option>)}</Select></Field>
+            <Field label="Nom complet" help="Il figurera sur le certificat."><Input value={offre.nom} onChange={(e) => setOffre({ ...offre, nom: e.target.value })} /></Field>
+            <Field label="Téléphone"><Input value={offre.telephone} onChange={(e) => setOffre({ ...offre, telephone: e.target.value })} inputMode="tel" /></Field>
           </div>
         )}
       </Modal>
@@ -5617,6 +5828,7 @@ function App() {
     case "commandes": content = isDetail ? <PageCommande id={route.id} /> : <PageCommandes route={route} />; break;
     case "produits": content = estAdmin ? <PageProduits route={route} /> : <AccesReserve />; break;
     case "diagnostics": content = estAdmin ? <PageDiagnostics /> : <AccesReserve />; break;
+    case "formations": content = estAdmin ? <PageFormations /> : <AccesReserve />; break;
     case "depenses": content = <PageDepenses />; break;
     case "clients": content = !estAdmin ? <AccesReserve /> : isDetail ? <PageClient id={route.id} /> : <PageClients route={route} />; break;
     case "ventes": content = <PageVentes />; break;

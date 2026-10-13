@@ -500,4 +500,7 @@ function nettoyerAbandons() {
 }
 setInterval(() => db.pourChaqueEspace(nettoyerAbandons), 10 * 60 * 1000).unref();
 
+// Formations : catalogue, inscription, parcours de l'apprenant, certificat
+require("./formations-publiques")(router, { espacePublic, espaceParJeton, trouverOuCreerClient, configPublique });
+
 module.exports = router;

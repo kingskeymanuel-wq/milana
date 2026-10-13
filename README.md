@@ -32,6 +32,15 @@ Au premier démarrage, une boutique de démonstration « MILANA Care » est cré
 Pour qu'un nouveau produit soit bien recommandé, son type de soin est déduit de son nom et de sa description
 (shampooing, démêlant, masque, sérum, huile, crème) ; les colonnes `soin_type` et `soin_cible` de la table `packs` priment si elles sont remplies.
 
+## Formations
+
+- Catalogue public sur `/#/formations`. Une formation = des leçons qui se suivent dans l'ordre, une évaluation chronométrée (facultative) et un certificat vérifiable (`/#/certificat/<code>`).
+- Formation gratuite : ouverte dès l'inscription (nom et téléphone). Formation payante : le client déclare son transfert Mobile Money ; l'accès s'ouvre quand l'administrateur clique « Reçu » dans Administration › Formations › Inscriptions.
+- Pas de compte client : chaque inscription a un lien d'accès personnel (`/#/formation/<jeton>`), que l'administrateur peut recopier et renvoyer.
+- Le contenu des leçons, les bonnes réponses et les fiches PDF (`backend/formations-supports/`) ne sont jamais envoyés à une personne dont l'accès n'est pas ouvert.
+- Cinq formations de départ sont installées une fois par espace ; elles se modifient et se suppriment dans l'administration.
+- Limites : le montant des formations payées n'entre pas dans les ventes ni les finances ; pas d'envoi de fichier PDF depuis l'administration (lien https seulement).
+
 ## Pas encore repris de la plateforme MILANA d'origine
 
-Formations payantes, annuaire des spécialistes, assistant de suivi, calendrier des fêtes pour les newsletters, paiement Chariow.
+Annuaire des spécialistes, assistant de suivi, calendrier des fêtes pour les newsletters, paiement Chariow.

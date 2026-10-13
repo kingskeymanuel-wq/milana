@@ -44,6 +44,7 @@ function creerEspace({ nom, telephone, email, mot_de_passe, boutique }) {
     ecrireBoutique({ nom: nomBoutique });
     const utilisateur = creerUtilisateur({ nom, telephone, email, mot_de_passe, role: "admin" });
     installerGamme(utilisateur.id); // la gamme MILANA Care est prête à vendre dès l'ouverture de l'espace
+    require("../lib/formations").installerFormations();
     return { boutique: b, utilisateur };
   });
 }

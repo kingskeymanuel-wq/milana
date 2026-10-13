@@ -97,6 +97,7 @@ app.use("/api/parametres", parametresRoutes);
 app.use("/api/livreurs", livreursRoutes);
 app.use("/api/depenses", depensesRoutes);
 app.use("/api/diagnostics", adminOnly, require("./routes/diagnostics"));
+app.use("/api/formations", adminOnly, require("./routes/formations"));
 
 app.use("/api", (req, res) => res.status(404).json({ erreur: "Route introuvable" }));
 
@@ -117,6 +118,9 @@ app.use((err, req, res, next) => {
   console.error(err);
   res.status(500).json({ erreur: "Erreur interne du serveur" });
 });
+
+// Formations de départ : installées une fois dans chaque espace (y compris ceux créés avant cette version)
+require("./db").pourChaqueEspace(() => require("./lib/formations").installerFormations());
 
 // Ventes enregistrées avant le suivi des tickets : numérotées une fois pour toutes
 const { numeroterManquants } = require("./lib/tickets");
