@@ -769,6 +769,30 @@ function PageCertificat({ code }) {
   );
 }
 
+/* Accueil : le rituel MILANA en trois étapes, puis une galerie */
+function SectionsMilana() {
+  const etapes = [
+    ["01", "Votre diagnostic", "Quelques questions sur vos cheveux, votre cuir chevelu et vos habitudes. Gratuit, en 3 minutes.", "#/diagnostic", "Commencer"],
+    ["02", "Votre routine", `Les soins MILANA Care choisis pour vous, leur mode d'emploi, et −${REMISE_DIAG} % sur votre routine.`, "#/diagnostic", "Voir ma routine"],
+    ["03", "Votre savoir-faire", "Des formations courtes pour adopter les bons gestes, avec un certificat à la clé.", "#/formations", "Voir les formations"],
+  ];
+  return (
+    <>
+      <section className="v-section mi-rituel">
+        <div className="mi-titre"><span className="dx-sur">Le rituel MILANA</span><h2>Trois étapes vers des cheveux <em>en pleine santé</em></h2></div>
+        <div className="mi-etapes">
+          {etapes.map(([n, titre, texte, lien, action]) => (
+            <a key={n} href={lien} className="mi-etape"><i>{n}</i><h3>{titre}</h3><p>{texte}</p><span>{action}<ArrowRight size={15} /></span></a>
+          ))}
+        </div>
+      </section>
+      <section className="mi-galerie" aria-hidden="true">
+        {[1, 3, 4, 6].map((n) => <div key={n}><img src={`/images/modeles/model-${n}.jpg`} alt="" loading="lazy" /></div>)}
+      </section>
+    </>
+  );
+}
+
 function PageAccueil({ slug }) {
   const { config, boutiques, recherche, setRecherche, ...reste } = useBoutique();
   // Page d'une boutique : uniquement ses produits ; accueil : ceux de tous les administrateurs
@@ -799,7 +823,14 @@ function PageAccueil({ slug }) {
     <>
       {!recherche && (
         <section className="v-hero">
-          <div className="v-hero-in">
+          <div className={cx("v-hero-in", !slug && "mi-hero")}>
+            {!slug && (
+              <div className="mi-visuel" aria-hidden="true">
+                <img className="mi-portrait" src="/images/modeles/model-2.jpg" alt="" />
+                <img className="mi-gamme" src="/images/gamme.png" alt="" />
+                <span className="mi-pastille"><b>−{REMISE_DIAG} %</b>sur votre routine</span>
+              </div>
+            )}
             {slug ? <a className="v-retour" href="#/"><ArrowLeft size={16} />Toutes les boutiques</a> : null}
             <span className="v-hero-tag">{slug ? <><Store size={14} />Boutique</> : <><Sparkles size={14} />Soins capillaires naturels</>}</span>
             <h1>{slug ? b.nom : <>Votre routine capillaire, <em>sur mesure</em>.</>}</h1>
@@ -821,6 +852,8 @@ function PageAccueil({ slug }) {
           </div>
         </section>
       )}
+
+      {!slug && !recherche && <SectionsMilana />}
 
       {!slug && !recherche && avecProduits.length > 1 && (
         <section className="v-section v-boutiques">

@@ -1,28 +1,126 @@
 /* =====================================================================
-   MILANA — identité « luxe épuré » posée sur le système de design commun :
-   fond ivoire, encre vert-noir, accent champagne, titres en Cormorant Garamond.
-   Puis les écrans du diagnostic capillaire (questionnaire et bilan).
+   MILANA — identité « sombre et premium » posée sur le système de design commun :
+   fond vert-noir profond, or chaud (celui des étiquettes MILANA Care), texte ivoire,
+   titres en Cormorant Garamond. Les photos des produits gardent leur écrin clair.
+   Puis les écrans du diagnostic capillaire et des formations.
    ===================================================================== */
-:root, :root[data-theme="light"] {
-  --bg: #F3EFE9; --surface: #FBF9F6; --surface-2: #F3EFE9; --surface-3: #E9E3DA; --hover: #F1ECE5; --pressed: #E9E3DA;
-  --border: #E4DDD2; --border-strong: #CFC6B8; --divider: #EAE4DA;
-  --text: #1B1B19; --text-2: #5F5A53; --text-3: #8C857C;
-  --topbar: #1D2A24; --primary: #1D2A24; --primary-hover: #33443C;
-  --brand: #1D2A24; --brand-strong: #111A16; --brand-soft: #E8E4DB; --link: #7A5C45; --focus: #B4935C;
-  --or: #B4935C; --taupe: #9A7B66; --titre: "Cormorant Garamond", "Playfair Display", Georgia, serif;
+:root, :root[data-theme="dark"] {
+  --bg: #0B0F0D; --surface: #0F1513; --surface-2: #141B18; --surface-3: #212B27; --hover: #1A2320; --pressed: #212B27;
+  --border: #27322D; --border-strong: #3B4943; --divider: #1E2824;
+  --text: #F4EFE6; --text-2: #B8B1A4; --text-3: #8A8479;
+  --topbar: #070A09; --primary: #D4A64A; --primary-hover: #E3BB63; --primary-text: #14110A;
+  --brand: #D4A64A; --brand-strong: #B98C33; --brand-soft: rgba(212,166,74,.14); --link: #E3BB63; --focus: #D4A64A;
+  --or: #D4A64A; --or-clair: #F0D08A; --taupe: #C9B48A; --carte: #141B18; --encre: #14110A;
+  --titre: "Cormorant Garamond", "Playfair Display", Georgia, serif;
+  color-scheme: dark;
 }
-body.vitrine { background: var(--surface); }
-.vitrine h1, .vitrine h2, .v-section-tete h2, .v-logo { font-family: var(--titre); font-weight: 600; letter-spacing: 0; }
+body.vitrine, :root[data-theme="dark"] body.vitrine { background: var(--bg); color: var(--text); }
+.vitrine h1, .vitrine h2, .v-section-tete h2, .v-sous-titre, .v-titre, .v-logo { font-family: var(--titre); font-weight: 600; letter-spacing: 0; }
 .vitrine h1 em, .vitrine h2 em { font-style: italic; color: var(--or); }
-.v-logo { font-size: 24px; letter-spacing: 3px; text-transform: uppercase; }
+.vitrine .btn-brand, .vitrine .btn-primary { color: var(--encre); font-weight: 650; }
+.vitrine .btn-brand { background: linear-gradient(135deg, #E3BB63, #C8963A); border-color: transparent; box-shadow: 0 10px 30px -12px rgba(212,166,74,.7); }
+.vitrine .btn-brand:hover { background: linear-gradient(135deg, #F0D08A, #D4A64A); }
+.vitrine .btn-secondary { background: transparent; border-color: var(--border-strong); color: var(--text); }
+.vitrine .btn-secondary:hover { border-color: var(--or); background: var(--brand-soft); }
+.vitrine ::selection { background: var(--or); color: var(--encre); }
+
+/* ---------- Bandeau et en-tête ---------- */
+.annonce { background: var(--topbar); color: var(--or-clair); letter-spacing: .6px; font-size: 12px; border-bottom: 1px solid var(--divider); }
+.v-header { background: rgba(11,15,13,.86); border-bottom: 1px solid var(--divider); }
+.v-header-in { height: 70px; }
+.v-logo { font-size: 26px; letter-spacing: 5px; text-transform: uppercase; color: var(--or-clair); }
 .v-logo .brand-mark { display: none; }
-.v-hero { background: radial-gradient(900px 420px at 0% 0%, rgba(180,147,92,.20), transparent 60%), radial-gradient(700px 380px at 100% 100%, rgba(154,123,102,.16), transparent 60%), var(--surface-2); }
-.v-hero h1 { font-size: clamp(38px, 6vw, 64px); line-height: 1.04; }
-.v-hero-tag { letter-spacing: 1.6px; text-transform: uppercase; font-size: 11.5px; color: var(--taupe); background: transparent; border: 1px solid var(--border-strong); }
-.v-lien-diag { border: 1px solid var(--or); color: var(--text); }
-.v-carte-nom { font-family: var(--titre); font-size: 19px; font-weight: 600; }
-.v-compteur { background: var(--or); }
-@media (max-width: 520px) { .v-lien-diag span { display: none; } .v-lien-diag { padding: 8px 10px; } }
+.v-search { background: var(--surface-2); border-color: var(--border); }
+.v-lien { color: var(--text-2); }
+.v-lien:hover { color: var(--text); background: var(--surface-2); }
+.v-lien-diag { border: 1px solid var(--or); color: var(--or-clair); }
+.v-lien-diag:hover { background: var(--brand-soft); color: var(--or-clair); }
+.v-compteur { background: var(--or); color: var(--encre); }
+@media (max-width: 520px) { .v-lien-diag span { display: none; } .v-lien-diag { padding: 8px 10px; } .v-logo { font-size: 21px; letter-spacing: 3px; } }
+
+/* ---------- Accueil : bannière ---------- */
+.v-hero { background: radial-gradient(900px 520px at 85% 0%, rgba(212,166,74,.20), transparent 62%), radial-gradient(700px 420px at 0% 100%, rgba(60,96,80,.35), transparent 60%), var(--bg); border-bottom: 1px solid var(--divider); }
+.v-hero-in { padding: 70px 20px 44px; }
+.v-hero h1 { font-size: clamp(42px, 6.4vw, 78px); line-height: 1; letter-spacing: -.5px; font-weight: 600; margin: 18px 0 18px; }
+.v-hero p { font-size: 17.5px; line-height: 1.6; color: var(--text-2); }
+.v-hero-tag { letter-spacing: 2px; text-transform: uppercase; font-size: 11px; color: var(--or-clair); background: transparent; border: 1px solid rgba(212,166,74,.45); padding: 6px 14px; }
+.mi-hero { display: grid; grid-template-columns: 1.08fr .92fr; column-gap: 56px; align-items: center; }
+.mi-hero > * { grid-column: 1; }
+.mi-hero > .mi-visuel { grid-column: 2; grid-row: 1 / span 8; position: relative; align-self: stretch; min-height: 480px; }
+.mi-portrait { position: absolute; inset: 0 0 0 40px; width: calc(100% - 40px); height: 100%; object-fit: cover; object-position: 50% 22%; border-radius: 240px 240px 8px 8px; box-shadow: 0 40px 80px -30px #000, 0 0 0 1px rgba(212,166,74,.5), 0 0 0 10px rgba(212,166,74,.08); }
+.mi-gamme { position: absolute; left: 0; bottom: 26px; width: 58%; border-radius: 8px; box-shadow: 0 30px 60px -20px #000, 0 0 0 1px rgba(212,166,74,.35); }
+.mi-pastille { position: absolute; right: -6px; top: 34px; width: 112px; height: 112px; border-radius: 50%; display: grid; place-content: center; text-align: center; background: linear-gradient(135deg, #F0D08A, #C8963A); color: var(--encre); font-size: 11.5px; line-height: 1.2; font-weight: 600; padding: 10px; box-shadow: 0 20px 40px -16px #000; transform: rotate(8deg); }
+.mi-pastille b { display: block; font-family: var(--titre); font-size: 30px; line-height: 1; }
+.v-garanties { padding-bottom: 44px; }
+.v-garanties > div { background: transparent; box-shadow: none; border: 1px solid var(--border); border-radius: 8px; color: var(--text-2); }
+.v-garanties svg { color: var(--or); }
+
+/* ---------- Accueil : rituel et galerie ---------- */
+.mi-rituel { padding-top: 64px; padding-bottom: 40px; }
+.mi-titre { max-width: 720px; margin-bottom: 30px; }
+.mi-titre h2 { font-size: clamp(32px, 4.6vw, 52px); line-height: 1.05; margin: 10px 0 0; }
+.mi-etapes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.mi-etape { display: flex; flex-direction: column; gap: 10px; padding: 28px 26px; border-radius: 10px; background: linear-gradient(160deg, var(--surface-2), var(--surface)); border: 1px solid var(--border); transition: border-color .2s, transform .25s; }
+.mi-etape:hover { border-color: var(--or); transform: translateY(-4px); }
+.mi-etape i { font-family: var(--titre); font-style: italic; font-size: 54px; line-height: 1; color: var(--or); }
+.mi-etape h3 { font-family: var(--titre); font-size: 27px; font-weight: 600; margin: 0; }
+.mi-etape p { margin: 0; color: var(--text-2); line-height: 1.55; }
+.mi-etape span { margin-top: auto; padding-top: 10px; display: inline-flex; align-items: center; gap: 7px; color: var(--or-clair); font-weight: 600; font-size: 14px; }
+.mi-galerie { max-width: 1200px; margin: 0 auto; padding: 10px 20px 20px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+.mi-galerie div { aspect-ratio: 3 / 4; border-radius: 8px; overflow: hidden; background: var(--surface-2); }
+.mi-galerie div:nth-child(even) { transform: translateY(26px); }
+.mi-galerie img { width: 100%; height: 100%; object-fit: cover; display: block; filter: saturate(.92); transition: transform .8s ease; }
+.mi-galerie div:hover img { transform: scale(1.05); }
+
+/* ---------- Produits ---------- */
+.v-section-tete h2, .v-sous-titre { font-size: clamp(28px, 3.6vw, 40px); }
+.v-grille { grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 20px; }
+.v-carte { background: var(--carte); border: 1px solid var(--border); border-radius: 12px; padding: 12px 12px 16px; transition: border-color .2s, transform .3s; }
+.v-carte:hover { border-color: rgba(212,166,74,.6); transform: translateY(-4px); }
+.v-carte:hover .v-carte-media { transform: none; box-shadow: none; }
+.v-carte-media { aspect-ratio: 4 / 5; border-radius: 8px; background: #fff; box-shadow: none; }
+.vitrine .img-produit { object-fit: contain; background: #fff; }
+.vitrine .img-vide { background: var(--surface-3); }
+.v-carte-corps { padding: 14px 4px 0; gap: 6px; }
+.v-carte-nom { font-family: var(--titre); font-size: 23px; line-height: 1.12; font-weight: 600; }
+.v-carte-nom:hover { text-decoration: none; color: var(--or-clair); }
+.v-carte-boutique { display: none; }
+.v-carte-desc { color: var(--text-2); font-size: 13.5px; }
+.v-prix { color: var(--or-clair); font-size: 18px; }
+.v-prix-barre { color: var(--text-3); }
+.v-etiquette { background: rgba(11,15,13,.86); color: var(--or-clair); border: 1px solid rgba(212,166,74,.4); }
+.v-etiquette.promo { background: linear-gradient(135deg, #E3BB63, #C8963A); color: var(--encre); border: 0; }
+.v-etiquette.epuise { background: #2A2A2A; color: #ddd; box-shadow: none; }
+.v-footer { background: var(--topbar); border-top: 1px solid var(--divider); margin-top: 48px; }
+.v-footer-bas a { color: var(--text-2); }
+.v-barre-panier { background: linear-gradient(135deg, #E3BB63, #C8963A); color: var(--encre); }
+
+/* ---------- Téléphone ---------- */
+@media (max-width: 900px) {
+  .mi-hero { grid-template-columns: 1fr; }
+  .mi-hero > .mi-visuel { grid-column: 1; grid-row: auto; order: -1; min-height: 0; height: 340px; margin-bottom: 26px; }
+  .mi-portrait { inset: 0 0 0 22%; width: 78%; border-radius: 180px 180px 8px 8px; }
+  .mi-gamme { width: 52%; bottom: 14px; }
+  .mi-pastille { right: 0; top: 10px; width: 92px; height: 92px; font-size: 10.5px; }
+  .mi-pastille b { font-size: 24px; }
+  .v-hero-in { padding: 26px 16px 30px; }
+  .mi-etapes { grid-template-columns: 1fr; }
+  .mi-galerie { grid-template-columns: repeat(2, 1fr); padding: 0 16px 10px; }
+  .mi-galerie div:nth-child(even) { transform: translateY(18px); }
+  .v-garanties { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 560px) {
+  .v-hero .row { flex-direction: column; align-items: stretch; }
+  .v-hero .row .btn { width: 100%; justify-content: center; }
+  .v-grille { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .v-carte { padding: 8px 8px 12px; border-radius: 10px; }
+  .v-carte-nom { font-size: 18px; }
+  .v-carte-desc { display: none; }
+  .v-carte-bas { flex-direction: column; align-items: stretch; gap: 8px; }
+  .v-carte-bas .btn { width: 100%; justify-content: center; }
+  .v-prix { font-size: 16px; }
+  .v-section { padding: 28px 14px 40px; }
+}
 
 /* ---------- Diagnostic : présentation ---------- */
 .dx { max-width: 1040px; }
@@ -44,17 +142,17 @@ body.vitrine { background: var(--surface); }
 .dx-quiz h2 { font-size: clamp(28px, 4.6vw, 40px); line-height: 1.12; margin: 0 0 6px; }
 .dx-sous { color: var(--text-2); margin: 0 0 6px; }
 .dx-options { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; margin-top: 20px; }
-.dx-option { position: relative; display: flex; align-items: center; gap: 12px; min-height: 58px; padding: 12px 40px 12px 14px; border-radius: 6px; border: 1px solid var(--border-strong); background: #fff; color: var(--text); font: 500 15px/1.25 inherit; text-align: left; cursor: pointer; transition: border-color .15s, background .15s, transform .15s; }
+.dx-option { position: relative; display: flex; align-items: center; gap: 12px; min-height: 58px; padding: 12px 40px 12px 14px; border-radius: 6px; border: 1px solid var(--border-strong); background: var(--carte); color: var(--text); font: 500 15px/1.25 inherit; text-align: left; cursor: pointer; transition: border-color .15s, background .15s, transform .15s; }
 .dx-option:hover { border-color: var(--or); transform: translateY(-1px); }
 .dx-option span { font-size: 22px; flex: none; }
-.dx-option.choisi { border-color: var(--brand); background: var(--brand); color: #fff; }
+.dx-option.choisi { border-color: var(--or); background: var(--or); color: var(--encre); }
 .dx-coche { position: absolute; right: 14px; top: 50%; margin-top: -8px; }
 .dx-form { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 20px; }
 .dx-form label, .dx-label { display: grid; gap: 6px; font-size: 13px; font-weight: 600; color: var(--text-2); }
 .dx-plein { grid-column: 1 / -1; display: grid; gap: 6px; }
 .dx-sexe { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.dx-sexe button { height: 46px; border-radius: 6px; border: 1px solid var(--border-strong); background: #fff; color: var(--text); font: 500 15px inherit; cursor: pointer; }
-.dx-sexe button.choisi { background: var(--brand); border-color: var(--brand); color: #fff; }
+.dx-sexe button { height: 46px; border-radius: 6px; border: 1px solid var(--border-strong); background: var(--carte); color: var(--text); font: 500 15px inherit; cursor: pointer; }
+.dx-sexe button.choisi { background: var(--or); border-color: var(--or); color: var(--encre); }
 .dx-form label.dx-consent { display: flex; gap: 10px; align-items: flex-start; font-weight: 400; line-height: 1.45; }
 .dx-consent input { margin-top: 3px; flex: none; width: 16px; height: 16px; accent-color: var(--brand); }
 .dx-nav { display: flex; justify-content: space-between; gap: 12px; margin-top: 26px; }
@@ -63,7 +161,7 @@ body.vitrine { background: var(--surface); }
 .dx-bilan { display: grid; gap: 16px; }
 .dx-tete h1 { font-size: clamp(34px, 5vw, 54px); line-height: 1.06; margin: 8px 0 6px; }
 .dx-grille { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-.dx-carte { background: #fff; border: 1px solid var(--border); border-radius: 6px; padding: 22px; min-width: 0; }
+.dx-carte { background: var(--carte); border: 1px solid var(--border); border-radius: 6px; padding: 22px; min-width: 0; }
 .dx-carte h3 { display: flex; align-items: center; gap: 8px; font-family: var(--titre); font-size: 23px; font-weight: 600; margin: 0 0 14px; }
 .dx-carte h3 svg { color: var(--or); }
 .dx-carte-tete { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
@@ -73,7 +171,7 @@ body.vitrine { background: var(--surface); }
 .dx-score { display: flex; align-items: center; gap: 24px; }
 .dx-anneau { --c: #4E7D5E; flex: none; width: 150px; height: 150px; border-radius: 50%; display: grid; place-items: center; background: conic-gradient(var(--c) calc(var(--p) * 1%), var(--surface-3) 0); }
 .dx-anneau.moyen { --c: #B7853F; } .dx-anneau.faible { --c: #A94A43; }
-.dx-anneau > div { width: 118px; height: 118px; border-radius: 50%; background: #fff; display: grid; place-content: center; text-align: center; }
+.dx-anneau > div { width: 118px; height: 118px; border-radius: 50%; background: var(--carte); display: grid; place-content: center; text-align: center; }
 .dx-anneau strong { font-family: var(--titre); font-size: 52px; line-height: 1; font-weight: 600; }
 .dx-anneau span { font-size: 12px; color: var(--text-3); }
 .dx-score-infos { display: grid; gap: 12px; min-width: 0; }
@@ -120,15 +218,15 @@ body.vitrine { background: var(--surface); }
 }
 
 /* Les liens en forme de bouton gardent la couleur de texte du bouton */
-.vitrine a.btn-brand, .vitrine a.btn-primary { color: #fff; }
+.vitrine a.btn-brand, .vitrine a.btn-primary { color: var(--encre); }
 
 /* ---------- Formations ---------- */
 .fo-chapo { color: var(--text-2); font-size: 16px; margin: 0; max-width: 620px; }
 .fo-grille { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 18px; margin-top: 22px; }
-.fo-carte { display: flex; flex-direction: column; background: #fff; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.fo-carte { display: flex; flex-direction: column; background: var(--carte); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
 .fo-carte-img { position: relative; aspect-ratio: 16 / 10; background: var(--surface-3); display: grid; place-items: center; color: var(--text-3); }
 .fo-carte-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.fo-carte-img em { position: absolute; left: 12px; top: 12px; padding: 4px 10px; border-radius: 99px; background: rgba(255,255,255,.92); font-style: normal; font-size: 11.5px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; color: var(--taupe); }
+.fo-carte-img em { position: absolute; left: 12px; top: 12px; padding: 4px 10px; border-radius: 99px; background: rgba(11,15,13,.82); font-style: normal; font-size: 11.5px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; color: var(--taupe); }
 .fo-carte-corps { display: flex; flex-direction: column; gap: 8px; padding: 18px; flex: 1; }
 .fo-carte-corps h3 { font-family: var(--titre); font-size: 23px; line-height: 1.15; font-weight: 600; margin: 0; }
 .fo-carte-corps p { margin: 0; color: var(--text-2); font-size: 14px; line-height: 1.5; }
@@ -138,13 +236,13 @@ body.vitrine { background: var(--surface); }
 .fo-carte-bas { margin-top: auto; padding-top: 10px; display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 .fo-miennes { margin-top: 20px; }
 .fo-miennes a { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 11px 0; border-top: 1px solid var(--divider); font-weight: 500; }
-.fo-inscription { background: #fff; border: 1px solid var(--or); border-radius: 6px; padding: 22px; margin-top: 20px; }
+.fo-inscription { background: var(--carte); border: 1px solid var(--or); border-radius: 6px; padding: 22px; margin-top: 20px; }
 .fo-inscription-tete { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
 .fo-inscription-tete h2 { font-size: 28px; line-height: 1.15; margin: 4px 0 0; }
 .fo-paiement { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--divider); display: grid; gap: 12px; }
 .fo-paiement h3 { font-family: var(--titre); font-size: 22px; margin: 0; }
 .fo-ops { display: flex; flex-wrap: wrap; gap: 8px; }
-.fo-ops button { display: inline-flex; align-items: center; gap: 8px; height: 44px; padding: 0 14px; border-radius: 6px; border: 1px solid var(--border-strong); background: #fff; color: var(--text); font: 500 14px inherit; cursor: pointer; }
+.fo-ops button { display: inline-flex; align-items: center; gap: 8px; height: 44px; padding: 0 14px; border-radius: 6px; border: 1px solid var(--border-strong); background: var(--carte); color: var(--text); font: 500 14px inherit; cursor: pointer; }
 .fo-ops button.choisi { border-color: var(--brand); box-shadow: 0 0 0 1px var(--brand); }
 .fo-etapes { margin: 0; padding-left: 20px; display: grid; gap: 6px; color: var(--text-2); line-height: 1.5; }
 .fo-progres { display: flex; align-items: center; gap: 14px; margin: 4px 0; }
@@ -157,7 +255,7 @@ body.vitrine { background: var(--surface); }
 .fo-sommaire button.actif { background: var(--brand-soft); }
 .fo-sommaire button:disabled { opacity: .45; cursor: not-allowed; }
 .fo-pastille { flex: none; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; border: 1px solid var(--border-strong); font-size: 12px; font-weight: 600; }
-.fo-pastille.faite { background: #4E7D5E; border-color: #4E7D5E; color: #fff; }
+.fo-pastille.faite { background: #5E9A72; border-color: #5E9A72; color: #fff; }
 .fo-supports { display: grid; gap: 8px; padding: 12px 10px 6px; margin-top: 6px; border-top: 1px solid var(--divider); font-size: 14px; }
 .fo-supports a { display: inline-flex; align-items: center; gap: 7px; }
 .fo-contenu { display: grid; gap: 16px; min-width: 0; }
@@ -165,10 +263,10 @@ body.vitrine { background: var(--surface); }
 .fo-bloc p { margin: 0 0 12px; line-height: 1.65; font-size: 16px; }
 .fo-bloc ul { margin: 0 0 12px; padding-left: 22px; display: grid; gap: 6px; line-height: 1.6; font-size: 16px; }
 .fo-eval p { color: var(--text-2); margin: 0 0 14px; }
-.fo-minuteur { display: flex; justify-content: space-between; align-items: center; gap: 12px; position: sticky; top: 64px; background: #fff; padding: 6px 0 10px; z-index: 2; }
+.fo-minuteur { display: flex; justify-content: space-between; align-items: center; gap: 12px; position: sticky; top: 64px; background: var(--carte); padding: 6px 0 10px; z-index: 2; }
 .fo-minuteur h3 { margin: 0; }
 .fo-minuteur b { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 99px; background: var(--brand-soft); font-size: 15px; }
-.fo-minuteur b.presse { background: #F6DCD9; color: #A94A43; }
+.fo-minuteur b.presse { background: #5A2622; color: #FFD9D4; }
 .fo-question { display: grid; gap: 8px; margin-bottom: 20px; }
 .fo-question > b { font-size: 16px; line-height: 1.4; }
 .fo-question .dx-option { min-height: 50px; }
@@ -177,12 +275,14 @@ body.vitrine { background: var(--surface); }
 .fo-reussite > div { flex: 1; min-width: 180px; }
 .fo-reussite h3 { margin: 0 0 2px; }
 .fo-reussite p { margin: 0; color: var(--text-2); }
-.fo-certificat { max-width: 760px; margin: 0 auto; padding: 48px 32px; text-align: center; background: #fff; border: 1px solid var(--or); outline: 6px solid #fff; box-shadow: 0 0 0 7px var(--or); border-radius: 2px; }
+.fo-certificat { max-width: 760px; margin: 0 auto; padding: 48px 32px; text-align: center; background: #FBF9F6; color: #1B1B19; border: 1px solid #B4935C; outline: 6px solid #FBF9F6; box-shadow: 0 0 0 7px #B4935C; border-radius: 2px; }
+.fo-certificat h1 em { color: #9A7A3A; }
+.fo-certificat .dx-sur { color: #7A5C45; }
 .fo-certificat h1 { font-size: clamp(34px, 6vw, 56px); margin: 10px 0 22px; }
-.fo-certificat p { margin: 0 0 6px; color: var(--text-2); }
+.fo-certificat p { margin: 0 0 6px; color: #5F5A53; }
 .fo-certificat strong { display: block; font-family: var(--titre); font-size: clamp(32px, 6vw, 50px); font-weight: 600; margin-bottom: 16px; }
 .fo-certificat > b { display: block; font-family: var(--titre); font-size: clamp(22px, 4vw, 30px); font-weight: 600; }
-.fo-certificat-bas { display: flex; justify-content: center; flex-wrap: wrap; gap: 8px 26px; margin-top: 30px; padding-top: 18px; border-top: 1px solid var(--divider); font-size: 13.5px; color: var(--text-2); }
+.fo-certificat-bas { display: flex; justify-content: center; flex-wrap: wrap; gap: 8px 26px; margin-top: 30px; padding-top: 18px; border-top: 1px solid #E4DDD2; font-size: 13.5px; color: #5F5A53; }
 .vitrine .dx > .banner { margin: 6px 0; }
 @media (max-width: 860px) {
   .fo-lecteur { grid-template-columns: 1fr; }
@@ -191,6 +291,21 @@ body.vitrine { background: var(--surface); }
 }
 @media print {
   .annonce, .v-header, .v-footer, .v-barre-panier, .fo-sans-impression, [aria-label*="Installer"] { display: none !important; }
-  body.vitrine { background: #fff; }
+  body.vitrine, :root[data-theme="dark"] body.vitrine { background: #fff; }
+  .v-section.dx { padding: 0; }
   .fo-certificat { box-shadow: 0 0 0 7px #B4935C; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
+
+/* ---------- Bilan du diagnostic sur téléphone ---------- */
+@media (max-width: 560px) {
+  .dx-carte { padding: 16px; }
+  .dx-carte-tete .btn { width: 100%; height: auto; min-height: 46px; padding: 10px 14px; white-space: normal; text-align: center; justify-content: center; }
+  .dx-produits { grid-template-columns: 1fr; }
+  .dx-produit { grid-template-columns: 84px 1fr; gap: 12px; padding: 10px; }
+  .dx-produit-img { width: 84px; height: 106px; }
+  .dx-produit-bas { flex-wrap: wrap; }
+  .dx-produit-bas .v-prix { font-size: 15.5px; white-space: nowrap; }
+  .dx-produit-bas .btn { margin-left: auto; }
+  .dx-actions .btn { width: 100%; justify-content: center; }
+  .dx-anneau { width: 132px; height: 132px; } .dx-anneau > div { width: 104px; height: 104px; } .dx-anneau strong { font-size: 44px; }
 }
