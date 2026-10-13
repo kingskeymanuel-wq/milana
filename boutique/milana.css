@@ -1,0 +1,123 @@
+/* =====================================================================
+   MILANA — identité « luxe épuré » posée sur le système de design commun :
+   fond ivoire, encre vert-noir, accent champagne, titres en Cormorant Garamond.
+   Puis les écrans du diagnostic capillaire (questionnaire et bilan).
+   ===================================================================== */
+:root, :root[data-theme="light"] {
+  --bg: #F3EFE9; --surface: #FBF9F6; --surface-2: #F3EFE9; --surface-3: #E9E3DA; --hover: #F1ECE5; --pressed: #E9E3DA;
+  --border: #E4DDD2; --border-strong: #CFC6B8; --divider: #EAE4DA;
+  --text: #1B1B19; --text-2: #5F5A53; --text-3: #8C857C;
+  --topbar: #1D2A24; --primary: #1D2A24; --primary-hover: #33443C;
+  --brand: #1D2A24; --brand-strong: #111A16; --brand-soft: #E8E4DB; --link: #7A5C45; --focus: #B4935C;
+  --or: #B4935C; --taupe: #9A7B66; --titre: "Cormorant Garamond", "Playfair Display", Georgia, serif;
+}
+body.vitrine { background: var(--surface); }
+.vitrine h1, .vitrine h2, .v-section-tete h2, .v-logo { font-family: var(--titre); font-weight: 600; letter-spacing: 0; }
+.vitrine h1 em, .vitrine h2 em { font-style: italic; color: var(--or); }
+.v-logo { font-size: 24px; letter-spacing: 3px; text-transform: uppercase; }
+.v-logo .brand-mark { display: none; }
+.v-hero { background: radial-gradient(900px 420px at 0% 0%, rgba(180,147,92,.20), transparent 60%), radial-gradient(700px 380px at 100% 100%, rgba(154,123,102,.16), transparent 60%), var(--surface-2); }
+.v-hero h1 { font-size: clamp(38px, 6vw, 64px); line-height: 1.04; }
+.v-hero-tag { letter-spacing: 1.6px; text-transform: uppercase; font-size: 11.5px; color: var(--taupe); background: transparent; border: 1px solid var(--border-strong); }
+.v-lien-diag { border: 1px solid var(--or); color: var(--text); }
+.v-carte-nom { font-family: var(--titre); font-size: 19px; font-weight: 600; }
+.v-compteur { background: var(--or); }
+@media (max-width: 520px) { .v-lien-diag span { display: none; } .v-lien-diag { padding: 8px 10px; } }
+
+/* ---------- Diagnostic : présentation ---------- */
+.dx { max-width: 1040px; }
+.dx-sur { font-size: 11.5px; letter-spacing: 1.8px; text-transform: uppercase; color: var(--taupe); font-weight: 600; }
+.dx-intro { display: grid; grid-template-columns: 1.1fr .9fr; gap: 40px; align-items: center; }
+.dx-intro h1 { font-size: clamp(40px, 6vw, 66px); line-height: 1.02; margin: 10px 0 16px; }
+.dx-intro p { color: var(--text-2); font-size: 16.5px; line-height: 1.6; max-width: 520px; }
+.dx-atouts { list-style: none; padding: 0; margin: 20px 0 26px; display: grid; gap: 10px; }
+.dx-atouts li { display: flex; gap: 10px; align-items: center; font-weight: 500; }
+.dx-atouts svg { color: var(--or); flex: none; }
+.dx-intro-image { border-radius: 6px; overflow: hidden; aspect-ratio: 4 / 5; background: var(--surface-3); }
+.dx-intro-image img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* ---------- Diagnostic : questionnaire ---------- */
+.dx-quiz { max-width: 720px; margin: 0 auto; scroll-margin-top: 90px; }
+.dx-progres { height: 3px; background: var(--border); border-radius: 3px; overflow: hidden; margin-bottom: 22px; }
+.dx-progres i { display: block; height: 100%; background: var(--or); transition: width .35s ease; }
+.dx-quiz-tete { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 8px; }
+.dx-quiz h2 { font-size: clamp(28px, 4.6vw, 40px); line-height: 1.12; margin: 0 0 6px; }
+.dx-sous { color: var(--text-2); margin: 0 0 6px; }
+.dx-options { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; margin-top: 20px; }
+.dx-option { position: relative; display: flex; align-items: center; gap: 12px; min-height: 58px; padding: 12px 40px 12px 14px; border-radius: 6px; border: 1px solid var(--border-strong); background: #fff; color: var(--text); font: 500 15px/1.25 inherit; text-align: left; cursor: pointer; transition: border-color .15s, background .15s, transform .15s; }
+.dx-option:hover { border-color: var(--or); transform: translateY(-1px); }
+.dx-option span { font-size: 22px; flex: none; }
+.dx-option.choisi { border-color: var(--brand); background: var(--brand); color: #fff; }
+.dx-coche { position: absolute; right: 14px; top: 50%; margin-top: -8px; }
+.dx-form { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 20px; }
+.dx-form label, .dx-label { display: grid; gap: 6px; font-size: 13px; font-weight: 600; color: var(--text-2); }
+.dx-plein { grid-column: 1 / -1; display: grid; gap: 6px; }
+.dx-sexe { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.dx-sexe button { height: 46px; border-radius: 6px; border: 1px solid var(--border-strong); background: #fff; color: var(--text); font: 500 15px inherit; cursor: pointer; }
+.dx-sexe button.choisi { background: var(--brand); border-color: var(--brand); color: #fff; }
+.dx-form label.dx-consent { display: flex; gap: 10px; align-items: flex-start; font-weight: 400; line-height: 1.45; }
+.dx-consent input { margin-top: 3px; flex: none; width: 16px; height: 16px; accent-color: var(--brand); }
+.dx-nav { display: flex; justify-content: space-between; gap: 12px; margin-top: 26px; }
+
+/* ---------- Diagnostic : bilan ---------- */
+.dx-bilan { display: grid; gap: 16px; }
+.dx-tete h1 { font-size: clamp(34px, 5vw, 54px); line-height: 1.06; margin: 8px 0 6px; }
+.dx-grille { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.dx-carte { background: #fff; border: 1px solid var(--border); border-radius: 6px; padding: 22px; min-width: 0; }
+.dx-carte h3 { display: flex; align-items: center; gap: 8px; font-family: var(--titre); font-size: 23px; font-weight: 600; margin: 0 0 14px; }
+.dx-carte h3 svg { color: var(--or); }
+.dx-carte-tete { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
+.dx-carte-tete h3 { margin: 0 0 4px; }
+.dx-carte-tete p { margin: 0; color: var(--text-2); font-size: 14px; }
+.dx-barre-prix { margin-left: 8px; opacity: .65; font-weight: 400; }
+.dx-score { display: flex; align-items: center; gap: 24px; }
+.dx-anneau { --c: #4E7D5E; flex: none; width: 150px; height: 150px; border-radius: 50%; display: grid; place-items: center; background: conic-gradient(var(--c) calc(var(--p) * 1%), var(--surface-3) 0); }
+.dx-anneau.moyen { --c: #B7853F; } .dx-anneau.faible { --c: #A94A43; }
+.dx-anneau > div { width: 118px; height: 118px; border-radius: 50%; background: #fff; display: grid; place-content: center; text-align: center; }
+.dx-anneau strong { font-family: var(--titre); font-size: 52px; line-height: 1; font-weight: 600; }
+.dx-anneau span { font-size: 12px; color: var(--text-3); }
+.dx-score-infos { display: grid; gap: 12px; min-width: 0; }
+.dx-score-infos span, .dx-objectifs span { display: block; font-size: 11.5px; letter-spacing: 1.2px; text-transform: uppercase; color: var(--text-3); }
+.dx-score-infos b, .dx-objectifs b { font-weight: 600; }
+.dx-objectifs { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.dx-objectifs b { font-family: var(--titre); font-size: 22px; line-height: 1.2; }
+.dx-barre { display: grid; grid-template-columns: 138px 1fr 34px; align-items: center; gap: 12px; margin-bottom: 12px; font-size: 14px; }
+.dx-barre > span { display: flex; align-items: center; gap: 7px; }
+.dx-barre > span svg { color: var(--or); flex: none; }
+.dx-barre i { height: 7px; border-radius: 7px; background: var(--surface-3); overflow: hidden; }
+.dx-barre i b { display: block; height: 100%; border-radius: 7px; background: #4E7D5E; }
+.dx-barre i b.moyen { background: #B7853F; } .dx-barre i b.faible { background: #A94A43; }
+.dx-barre em { font-style: normal; font-weight: 700; text-align: right; }
+.dx-produits { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+.dx-produit { display: grid; grid-template-columns: 96px 1fr; gap: 14px; padding: 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); }
+.dx-produit-img { display: block; width: 96px; height: 120px; border-radius: 4px; overflow: hidden; background: var(--surface-2); }
+.dx-produit-img > * { width: 100%; height: 100%; object-fit: cover; }
+.dx-produit-corps { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.dx-produit-corps b { font-family: var(--titre); font-size: 19px; line-height: 1.15; }
+.dx-usage { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 600; color: var(--taupe); }
+.dx-produit-corps p { margin: 0; font-size: 13px; color: var(--text-2); line-height: 1.4; }
+.dx-produit-bas { margin-top: auto; display: flex; justify-content: space-between; align-items: center; gap: 8px; padding-top: 6px; }
+.dx-routine { display: grid; gap: 0; }
+.dx-routine > div { display: grid; grid-template-columns: 190px 1fr; gap: 14px; padding: 11px 0; border-top: 1px solid var(--divider); }
+.dx-routine > div:first-child { border-top: 0; padding-top: 0; }
+.dx-routine span { color: var(--text-2); }
+.dx-liste { margin: 0; padding: 0; list-style: none; display: grid; gap: 9px; }
+.dx-liste li { position: relative; padding-left: 20px; color: var(--text-2); line-height: 1.45; }
+.dx-liste li::before { content: ""; position: absolute; left: 2px; top: 9px; width: 7px; height: 7px; border-radius: 50%; background: var(--or); }
+.dx-liste.ok li::before { background: #4E7D5E; } .dx-liste.non li::before { background: #A94A43; }
+.dx-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 6px; }
+.dx-note { font-size: 12.5px; color: var(--text-3); margin: 4px 0 0; }
+
+@media (max-width: 760px) {
+  .dx-intro, .dx-grille, .dx-objectifs, .dx-form { grid-template-columns: 1fr; }
+  .dx-intro-image { order: -1; aspect-ratio: 16 / 11; }
+  .dx-score { flex-direction: column; align-items: flex-start; }
+  .dx-routine > div { grid-template-columns: 1fr; gap: 2px; }
+  .dx-barre { grid-template-columns: 118px 1fr 30px; }
+  .dx-options { grid-template-columns: 1fr 1fr; }
+  .dx-option { padding: 10px 30px 10px 10px; font-size: 14px; }
+  .dx-nav .btn-lg { flex: 1; }
+}
+
+/* Les liens en forme de bouton gardent la couleur de texte du bouton */
+.vitrine a.btn-brand, .vitrine a.btn-primary { color: #fff; }

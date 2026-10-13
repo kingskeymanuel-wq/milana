@@ -1,0 +1,43 @@
+# Déploiement Render (Blueprint) — https://render.com/docs/blueprint-spec
+# Render → New → Blueprint → choisir ce dépôt → Apply.
+services:
+  - type: web
+    name: milana
+    runtime: node
+    # Le disque persistant (base de données + photos) exige une instance payante
+    plan: 0.5c-512mb
+    region: frankfurt
+    buildCommand: cd backend && npm ci
+    startCommand: cd backend && npm start
+    healthCheckPath: /api/sante
+    autoDeployTrigger: commit
+    disk:
+      name: donnees
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
+      # Base SQLite et photos des produits sur le disque persistant
+      - key: DB_PATH
+        value: /var/data/milana.db
+      - key: UPLOADS_DIR
+        value: /var/data/uploads
+      # Installation réelle : pas de boutiques ni de comptes de test
+      - key: DONNEES_TEST
+        value: "0"
+      # Secrets générés par Render
+      - key: JWT_SECRET
+        generateValue: true
+      # À renseigner dans le tableau de bord Render (facultatif)
+      - key: PUBLIC_URL
+        sync: false
+      # Réserve la création d'espaces administrateur à ceux qui ont ce code (vide = inscription ouverte)
+      - key: CODE_INVITATION
+        sync: false
+      - key: CINETPAY_API_KEY
+        sync: false
+      - key: CINETPAY_API_PASSWORD
+        sync: false
