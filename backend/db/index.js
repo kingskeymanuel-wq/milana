@@ -76,6 +76,22 @@ function ouvrirEspace(fichier) {
     moyen TEXT NOT NULL DEFAULT 'Espèces', note TEXT, recu_par TEXT, cree_le TEXT NOT NULL);`);
   ajouterColonne("ventes", "encaisse_par", "TEXT"); // qui a encaissé (paiement à la livraison confirmé plus tard)
   ajouterColonne("ventes", "sur_compte_vendeur", "INTEGER NOT NULL DEFAULT 0"); // 1 = payé sur le Mobile Money personnel du vendeur
+  // Montant réellement payé par le client, figé au paiement (lignes + livraison) : un retour ultérieur ne l'efface pas
+  if (ajouterColonne("commandes", "montant_paye", "INTEGER")) db.exec(`UPDATE commandes SET montant_paye = ROUND((SELECT SUM(v.quantite * v.prix_unitaire) FROM ventes v WHERE v.commande_id = commandes.id) + COALESCE(frais_livraison, 0))
+    WHERE statut <> 'annulee' AND EXISTS (SELECT 1 FROM ventes v WHERE v.commande_id = commandes.id)
+      AND NOT EXISTS (SELECT 1 FROM ventes v WHERE v.commande_id = commandes.id AND v.statut_paiement <> 'payee')`);
+  db.exec(`CREATE TRIGGER IF NOT EXISTS commandes_montant_paye AFTER INSERT ON commandes
+    BEGIN UPDATE commandes SET montant_paye = ROUND((SELECT SUM(quantite * prix_unitaire) FROM ventes WHERE commande_id = NEW.id) + COALESCE(NEW.frais_livraison, 0))
+      WHERE id = NEW.id AND EXISTS (SELECT 1 FROM ventes WHERE commande_id = NEW.id) AND NOT EXISTS (SELECT 1 FROM ventes WHERE commande_id = NEW.id AND statut_paiement <> 'payee'); END;
+  CREATE TRIGGER IF NOT EXISTS ventes_montant_paye AFTER UPDATE OF statut_paiement ON ventes WHEN NEW.statut_paiement = 'payee' AND OLD.statut_paiement <> 'payee'
+    BEGIN UPDATE commandes SET montant_paye = ROUND((SELECT SUM(quantite * prix_unitaire) FROM ventes WHERE commande_id = commandes.id) + COALESCE(frais_livraison, 0))
+      WHERE id = NEW.commande_id AND montant_paye IS NULL AND NOT EXISTS (SELECT 1 FROM ventes WHERE commande_id = NEW.commande_id AND statut_paiement <> 'payee'); END;
+  CREATE TRIGGER IF NOT EXISTS ventes_montant_paye_insert AFTER INSERT ON ventes WHEN NEW.statut_paiement = 'payee' AND NEW.commande_id IS NOT NULL
+    BEGIN UPDATE commandes SET montant_paye = ROUND((SELECT SUM(quantite * prix_unitaire) FROM ventes WHERE commande_id = commandes.id) + COALESCE(frais_livraison, 0))
+      WHERE id = NEW.commande_id AND montant_paye IS NULL AND statut <> 'annulee' AND NOT EXISTS (SELECT 1 FROM ventes WHERE commande_id = NEW.commande_id AND statut_paiement <> 'payee'); END;
+  CREATE TABLE IF NOT EXISTS reglements_retour (
+    id TEXT PRIMARY KEY, commande_id TEXT NOT NULL, sens TEXT NOT NULL, montant INTEGER NOT NULL, motif TEXT,
+    statut TEXT NOT NULL DEFAULT 'a_regler', moyen TEXT, note TEXT, cree_le TEXT NOT NULL, cree_par TEXT, regle_le TEXT, regle_par TEXT);`);
   ajouterColonne("utilisateurs", "paiements", "TEXT"); // moyens de paiement personnels du vendeur (JSON)
   ajouterColonne("clients", "vendeur_id", "TEXT"); // vendeur qui a apporté le client (null : client de la boutique)
   db.exec("UPDATE ventes SET commande_id = (SELECT c.id FROM commandes c WHERE c.vente_id = ventes.id) WHERE commande_id IS NULL");

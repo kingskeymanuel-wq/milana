@@ -3103,6 +3103,7 @@ function PageCommande({ id }) {
       />
 
       <RetourModal open={retour} cmd={c} onClose={() => setRetour(false)} onFait={chargerRetours} />
+      <ReglementsCommande commandeId={c.id} version={`${c.statut}:${c.total}:${(c.lignes || []).length}`} />
       <div className="layout-detail">
         <div>
           <Card title={<span className="row"><StatutBadge statut={c.statut} /></span>} actions={next && <Btn variant="primary" icon={next.icon} onClick={() => setStatut(next.statut)}>{next.label}</Btn>}>
@@ -5123,6 +5124,54 @@ function RemiseModal({ detenteur, onClose, onFait }) {
   );
 }
 
+/* Règlement d'un retour : rembourser le client, ou encaisser un complément d'échange */
+function ReglementModal({ reglement, onClose, onFait }) {
+  const { toast } = useApp();
+  const [moyen, setMoyen] = useState("Espèces");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { setMoyen("Espèces"); setNote(""); }, [reglement?.id]);
+  const rembourser = reglement?.sens === "rembourser";
+  const valider = async () => {
+    setBusy(true);
+    try { await apiFetch("POST", `/api/caisse/retours/${reglement.id}/regler`, { moyen, note }); toast({ title: rembourser ? "Remboursement enregistré" : "Complément encaissé", desc: fmt(reglement.montant) + " · " + moyen }); onFait(); }
+    catch (e) { toast({ title: "Enregistrement impossible", desc: e.message, tone: "critical" }); }
+    finally { setBusy(false); }
+  };
+  return (
+    <Modal open={!!reglement} onClose={onClose} size="sm" title={rembourser ? `Rembourser ${fmt(reglement?.montant || 0)}` : `Encaisser ${fmt(reglement?.montant || 0)}`}
+      footer={<><Btn onClick={onClose}>Annuler</Btn><Btn variant="primary" loading={busy} onClick={valider}>{rembourser ? "Client remboursé" : "Complément reçu"}</Btn></>}>
+      <div className="stack">
+        <p className="subtle" style={{ margin: 0 }}>{reglement?.motif} · commande {reglement?.numero || ""}. {rembourser ? "Indiquez comment vous avez rendu l'argent au client." : "Indiquez comment le client a payé la différence."}</p>
+        <Field label={rembourser ? "Remboursé en" : "Reçu en"}><div className="chips">{["Espèces", "Wave", "Orange Money", "MTN MoMo", "Moov Money"].map((m) => <button type="button" key={m} className={cx("chip", moyen === m && "on")} onClick={() => setMoyen(m)}>{m}</button>)}</div></Field>
+        <Field label="Note" optional><Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Ex : référence du transfert" /></Field>
+      </div>
+    </Modal>
+  );
+}
+
+/* Sur la page d'une commande : l'argent à rendre ou à encaisser après un retour, un échange ou une annulation */
+function ReglementsCommande({ commandeId, version }) {
+  const { mode } = useApp();
+  const [liste, setListe] = useState([]);
+  const [choix, setChoix] = useState(null);
+  const charger = useCallback(() => { if (mode === "api") apiFetch("GET", "/api/caisse/retours").then((l) => setListe(l.filter((x) => x.commande_id === commandeId))).catch(() => setListe([])); }, [commandeId, mode]);
+  useEffect(() => { charger(); }, [charger, version]);
+  if (!liste.length) return null;
+  return (
+    <>
+      {liste.map((x) => (
+        <div key={x.id} className={cx("banner", x.sens === "rembourser" ? "banner-warning" : "banner-info")} style={{ marginBottom: 12, alignItems: "center" }}>
+          <Banknote size={16} />
+          <div className="grow"><b>{x.sens === "rembourser" ? `${fmt(x.montant)} à rembourser au client` : `${fmt(x.montant)} à encaisser auprès du client`}</b> · {x.motif}</div>
+          <Btn size="sm" variant="primary" onClick={() => setChoix(x)}>{x.sens === "rembourser" ? "Rembourser" : "Encaisser"}</Btn>
+        </div>
+      ))}
+      <ReglementModal reglement={choix} onClose={() => setChoix(null)} onFait={() => { setChoix(null); charger(); }} />
+    </>
+  );
+}
+
 function PageCaisse() {
   const { toast, confirm, mode } = useApp();
   const [jour, setJour] = useState(isoDate(new Date()));
@@ -5130,6 +5179,7 @@ function PageCaisse() {
   const [fond, setFond] = useState("");
   const [compte, setCompte] = useState({ especes: "", note: "" });
   const [remise, setRemise] = useState(null);
+  const [reglement, setReglement] = useState(null);
   const [busy, setBusy] = useState(false);
   const charger = useCallback(async () => {
     try { const r = await apiFetch("GET", `/api/caisse?jour=${jour}`); setC(r); setFond((f) => f || String(r.fond_suggere || "")); }
@@ -5144,7 +5194,12 @@ function PageCaisse() {
   const ouvrir = () => action(() => apiFetch("POST", "/api/caisse/ouvrir", { jour, fond_initial: Number(fond) || 0 }), "Caisse ouverte");
   const fermer = () => action(async () => { await apiFetch("POST", "/api/caisse/fermer", { jour, especes_comptees: Number(compte.especes), note: compte.note }); setCompte({ especes: "", note: "" }); }, "Caisse fermée");
   const annulerRemise = async (r) => { if (await confirm({ title: "Annuler cette remise ?", message: `${fmt(r.montant)} (${r.moyen})`, confirmLabel: "Annuler la remise", tone: "critical" })) action(() => apiFetch("DELETE", `/api/caisse/remises/${r.id}`), "Remise annulée"); };
-  const detenus = c.detenteurs.filter((d) => d.encaisse > 0 || d.remis > 0);
+  const classer = async (x) => {
+    const note = window.prompt("Pourquoi ce retour se règle-t-il sans argent ? (ex. avoir accordé au client)", "Avoir accordé au client");
+    if (note === null) return;
+    action(() => apiFetch("POST", `/api/caisse/retours/${x.id}/abandonner`, { note }), "Retour classé sans mouvement d'argent");
+  };
+  const detenus = c.detenteurs.filter((d) => d.encaisse > 0 || d.remis > 0 || d.retours);
   const totalDetenu = detenus.reduce((x, d) => x + Math.max(0, d.detenu), 0);
   const ligne = (label, montant, signe, sous) => (
     <div className="row-between" style={{ padding: "8px 0", borderBottom: "1px solid var(--divider)" }}>
@@ -5175,6 +5230,7 @@ function PageCaisse() {
               {ligne("Espèces encaissées par la boutique", k.especes_caisse, 1, `${c.encaissements_caisse.length} commande(s)`)}
               {ligne("Remises reçues en espèces", k.remises_especes, 1, "Vendeurs et livreurs")}
               {ligne("Dépenses payées en espèces", k.depenses_especes, -1)}
+              {k.retours_especes ? ligne("Retours réglés en espèces", Math.abs(k.retours_especes), k.retours_especes < 0 ? -1 : 1, "Remboursements et compléments d'échange") : null}
               <div className="row-between" style={{ padding: "12px 0 4px" }}><span className="strong">Espèces attendues dans la caisse</span><span className="kpi-value num" style={{ fontSize: 24 }}>{fmt(k.theorique)}</span></div>
               {s.fermee_le ? (
                 <div className="stack-sm" style={{ marginTop: 8 }}>
@@ -5198,6 +5254,23 @@ function PageCaisse() {
             Object.entries(c.comptes).sort((a, b) => b[1] - a[1]).map(([m, v]) => <div key={m} className="row-between" style={{ padding: "8px 0", borderBottom: "1px solid var(--divider)" }}><span className="row" style={{ gap: 8 }}><ModePaiement mode={m} taille={20} />{m}</span><b className="num">{fmt(v)}</b></div>)}
         </Card>
       </div>
+
+      {c.a_regler.length > 0 && (
+        <Card title="Retours à régler" sub="Argent à rendre aux clients, ou complément d'échange à encaisser" padded={false} style={{ marginTop: 16 }}>
+          <div className="list">{c.a_regler.map((x) => (
+            <div key={x.id} className="list-item">
+              <div className="grow">
+                <div className="row-between"><span className="strong">{x.sens === "rembourser" ? "À rembourser" : "À encaisser"} · {x.numero || "commande"}</span><b className="num" style={{ color: x.sens === "rembourser" ? "var(--critical)" : "var(--success)" }}>{x.sens === "rembourser" ? "−" : "+"}{fmt(x.montant)}</b></div>
+                <div className="row-between" style={{ marginTop: 4 }}><span className="subtle">{x.motif} · {fmtDate(String(x.cree_le).slice(0, 10))}</span>
+                  <span className="row" style={{ gap: 6 }}>
+                    <Btn size="sm" onClick={() => classer(x)}>Avoir / sans argent</Btn>
+                    <Btn size="sm" variant="primary" onClick={() => setReglement(x)}>{x.sens === "rembourser" ? "Rembourser" : "Encaisser"}</Btn>
+                  </span></div>
+              </div>
+            </div>))}</div>
+        </Card>
+      )}
+      <ReglementModal reglement={reglement} onClose={() => setReglement(null)} onFait={() => { setReglement(null); charger(); }} />
 
       <Card title="Argent détenu par vos vendeurs et livreurs" sub={totalDetenu ? `${fmt(totalDetenu)} encore à vous remettre` : "Tout a été remis"} padded={false} style={{ marginTop: 16 }}>
         {detenus.length === 0 ? <EmptyState icon={Users} title="Personne ne détient d'argent">Les espèces encaissées par vos vendeurs, et celles reçues à la livraison par vos livreurs, apparaîtront ici.</EmptyState> : (

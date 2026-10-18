@@ -28,8 +28,9 @@ function livreurs() { return new Map(db.prepare("SELECT id, nom FROM livreurs").
 /** Une ligne par commande payée (non annulée), avec la personne qui détient l'argent. */
 function encaissements() {
   const users = utilisateurs(), livs = livreurs();
-  const lignes = db.prepare(`SELECT v.*, c.id AS cmd_id, c.statut AS cmd_statut, c.livreur_id, c.frais_livraison, c.numero
-    FROM ventes v LEFT JOIN commandes c ON c.id = v.commande_id OR (v.commande_id IS NULL AND c.vente_id = v.id)`).all();
+  const lignes = db.prepare(`SELECT v.*, c.id AS cmd_id, c.statut AS cmd_statut, c.livreur_id, c.frais_livraison, c.numero, c.montant_paye
+    FROM ventes v JOIN commandes c ON c.id = v.commande_id OR (v.commande_id IS NULL AND c.vente_id = v.id)
+    WHERE c.montant_paye IS NOT NULL`).all();
   const parCommande = new Map();
   for (const l of lignes) {
     const k = l.cmd_id || l.id;
@@ -38,9 +39,8 @@ function encaissements() {
   }
   const sortie = [];
   for (const [k, ls] of parCommande) {
-    if (ls[0].cmd_statut === "annulee" || !ls.every((l) => l.statut_paiement === "payee")) continue;
     const l0 = ls[0];
-    const montant = entier(ls.reduce((s, l) => s + l.quantite * l.prix_unitaire, 0) + (Number(l0.frais_livraison) || 0));
+    const montant = entier(l0.montant_paye);
     const payeLe = ls.map((l) => l.paye_le || l.date_vente).sort().pop();
     const mode = l0.mode_paiement;
     const especes = ESPECES.has(mode);
@@ -65,18 +65,73 @@ const remises = (filtre = "", ...p) => db.prepare(`SELECT * FROM caisse_remises 
 function detenteurs(liste = encaissements()) {
   const users = utilisateurs(), livs = livreurs(), m = new Map();
   const cle = (type, id) => type + ":" + id;
-  const obtenir = (type, id, nom) => { const k = cle(type, id); if (!m.has(k)) m.set(k, { type, id, nom, encaisse: 0, especes: 0, mobile: 0, remis: 0, n: 0, dernier: null }); return m.get(k); };
+  const obtenir = (type, id, nom) => { const k = cle(type, id); if (!m.has(k)) m.set(k, { type, id, nom, encaisse: 0, especes: 0, mobile: 0, remis: 0, retours: 0, n: 0, dernier: null }); return m.get(k); };
   for (const e of liste) {
     if (e.detenteur.type !== "vendeur" && e.detenteur.type !== "livreur") continue;
     const o = obtenir(e.detenteur.type, e.detenteur.id, e.detenteur.nom);
     o.encaisse += e.montant; o.n += 1; if (e.especes) o.especes += e.montant; else o.mobile += e.montant;
     if (!o.dernier || e.date > o.dernier) o.dernier = e.date;
   }
+  for (const e of effets().filter((x) => x.detenteur.type === "vendeur")) obtenir("vendeur", e.detenteur.id, e.detenteur.nom).retours += e.valeur;
   for (const r of remises()) {
     const nom = r.de_type === "livreur" ? livs.get(r.de_id)?.nom : users.get(r.de_id)?.nom;
     obtenir(r.de_type, r.de_id, nom || "Inconnu").remis += r.montant;
   }
-  return [...m.values()].map((o) => ({ ...o, detenu: o.encaisse - o.remis })).sort((a, b) => b.detenu - a.detenu);
+  return [...m.values()].map((o) => ({ ...o, detenu: o.encaisse + o.retours - o.remis })).sort((a, b) => b.detenu - a.detenu);
+}
+
+/* ---------- Retours, échanges, annulations : argent à rembourser ou à encaisser ---------- */
+const reglements = (filtre = "", ...p) => db.prepare(`SELECT r.*, c.numero FROM reglements_retour r LEFT JOIN commandes c ON c.id = r.commande_id ${filtre} ORDER BY r.cree_le DESC`).all(...p);
+
+/** Crée un règlement si la commande a déjà été payée (sinon le paiement final tient déjà compte du retour). */
+function creerReglement(commandeId, difference, motif, userId) {
+  const c = db.prepare("SELECT montant_paye FROM commandes WHERE id = ?").get(commandeId);
+  const m = entier(Math.abs(difference));
+  if (!c || c.montant_paye == null || !m) return null;
+  const id = nanoid();
+  db.prepare("INSERT INTO reglements_retour (id, commande_id, sens, montant, motif, statut, cree_le, cree_par) VALUES (?, ?, ?, ?, ?, 'a_regler', ?, ?)")
+    .run(id, commandeId, difference > 0 ? "rembourser" : "encaisser", m, String(motif).slice(0, 200), new Date().toISOString(), userId || null);
+  return id;
+}
+
+/** Effet d'un règlement sur l'argent : signe + (encaissé) ou − (remboursé), et qui le porte. */
+function effets() {
+  const users = utilisateurs();
+  return reglements("WHERE r.statut = 'regle'").map((x) => {
+    const u = users.get(x.regle_par);
+    const signe = x.sens === "encaisser" ? 1 : -1;
+    const detenteur = u?.role === "vendeur" ? { type: "vendeur", id: u.id, nom: u.nom } : x.moyen === "Espèces" ? { type: "caisse" } : { type: "compte" };
+    return { ...x, valeur: signe * x.montant, jour: jourDe(x.regle_le), detenteur };
+  });
+}
+
+function regler(id, { moyen, note }, user) {
+  const x = db.prepare("SELECT * FROM reglements_retour WHERE id = ?").get(id);
+  if (!x) return { erreur: "Règlement introuvable" };
+  if (x.statut !== "a_regler") return { erreur: "Ce règlement est déjà traité" };
+  const mo = ["Espèces", "Wave", "Orange Money", "MTN MoMo", "Moov Money"].includes(moyen) ? moyen : null;
+  if (!mo) return { erreur: "Choisissez le moyen de paiement utilisé" };
+  if (lireSession(jourDe(new Date().toISOString()))?.fermee_le && mo === "Espèces" && user.role === "admin") return { erreur: "La caisse du jour est fermée : réglez en espèces demain" };
+  db.prepare("UPDATE reglements_retour SET statut = 'regle', moyen = ?, note = ?, regle_le = ?, regle_par = ? WHERE id = ?")
+    .run(mo, String(note || "").trim().slice(0, 200) || null, new Date().toISOString(), user.id, id);
+  return { ok: true };
+}
+
+/** L'administrateur peut classer un règlement sans mouvement d'argent (avoir, geste commercial…), avec une raison. */
+function abandonner(id, note) {
+  const x = db.prepare("SELECT * FROM reglements_retour WHERE id = ?").get(id);
+  if (!x || x.statut !== "a_regler") return { erreur: "Règlement introuvable ou déjà traité" };
+  const n = String(note || "").trim();
+  if (n.length < 3) return { erreur: "Indiquez la raison (ex. avoir accordé au client)" };
+  db.prepare("UPDATE reglements_retour SET statut = 'abandonne', note = ?, regle_le = ? WHERE id = ?").run(n.slice(0, 200), new Date().toISOString(), id);
+  return { ok: true };
+}
+
+/** Règlements en attente, visibles par l'administrateur (tous) ou par le vendeur (ses commandes). */
+function aRegler(user) {
+  const liste = reglements("WHERE r.statut = 'a_regler'");
+  if (user.role === "admin") return liste;
+  return liste.filter((x) => db.prepare("SELECT 1 FROM ventes WHERE commande_id = ? AND vendeur_id = ? LIMIT 1").get(x.commande_id, user.id));
 }
 
 const lireSession = (jour) => db.prepare("SELECT * FROM caisse_sessions WHERE jour = ?").get(jour) || null;
@@ -91,16 +146,20 @@ function journee(jour) {
   const remisesEspeces = remisesJour.filter((r) => r.moyen === "Espèces").reduce((s, r) => s + r.montant, 0);
   const depenses = db.prepare("SELECT d.*, u.nom AS auteur FROM depenses d LEFT JOIN utilisateurs u ON u.id = d.auteur_id WHERE d.date_depense = ? ORDER BY d.cree_le").all(jour);
   const depensesEspeces = depenses.filter((d) => (d.moyen || "Espèces") === "Espèces").reduce((s, d) => s + d.montant, 0);
+  const effetsJour = effets().filter((x) => x.jour === jour);
+  const retoursEspeces = effetsJour.filter((x) => x.detenteur.type === "caisse").reduce((s, x) => s + x.valeur, 0);
   const fond = session ? session.fond_initial : 0;
-  const theorique = fond + especesCaisse + remisesEspeces - depensesEspeces;
+  const theorique = fond + especesCaisse + remisesEspeces - depensesEspeces + retoursEspeces;
   // Comptes de la boutique (Mobile Money, carte, en ligne) : pour information, rien à compter dans le tiroir
   const comptes = {};
   for (const e of duJour.filter((x) => x.detenteur.type === "compte")) comptes[e.mode] = (comptes[e.mode] || 0) + e.montant;
   for (const r of remisesJour.filter((x) => x.moyen !== "Espèces")) comptes[r.moyen] = (comptes[r.moyen] || 0) + r.montant;
+  for (const x of effetsJour.filter((e) => e.detenteur.type === "compte")) comptes[x.moyen] = (comptes[x.moyen] || 0) + x.valeur;
   const precedente = db.prepare("SELECT * FROM caisse_sessions WHERE jour < ? AND fermee_le IS NOT NULL ORDER BY jour DESC LIMIT 1").get(jour) || null;
   return {
     jour, session, fond_suggere: precedente ? precedente.especes_comptees : 0,
-    calcul: { fond, especes_caisse: especesCaisse, remises_especes: remisesEspeces, depenses_especes: depensesEspeces, theorique },
+    calcul: { fond, especes_caisse: especesCaisse, remises_especes: remisesEspeces, depenses_especes: depensesEspeces, retours_especes: retoursEspeces, theorique },
+    a_regler: reglements("WHERE r.statut = 'a_regler'"), regles_jour: effetsJour,
     encaissements_caisse: duJour.filter((e) => e.detenteur.type === "caisse"),
     comptes, remises: remisesJour, depenses: depenses.map((d) => ({ id: d.id, libelle: d.libelle, montant: d.montant, moyen: d.moyen || "Espèces", auteur: d.auteur })),
     detenteurs: detenteurs(liste),
@@ -178,4 +237,4 @@ function marquerCompteVendeur(commandeId, vendeurId, mode) {
   return true;
 }
 
-module.exports = { marquerCompteVendeur, encaissements, detenteurs, journee, ouvrir, fermer, remettre, annulerRemise, situationVendeur, lireSession };
+module.exports = { creerReglement, regler, abandonner, aRegler, marquerCompteVendeur, encaissements, detenteurs, journee, ouvrir, fermer, remettre, annulerRemise, situationVendeur, lireSession };

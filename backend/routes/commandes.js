@@ -66,6 +66,18 @@ router.get("/:id", (req, res) => {
 // PATCH /api/commandes/:id/statut — { statut: "expediee" }
 // Une annulation remet les articles en stock ; un rétablissement les retire.
 /** Annuler ou rétablir une commande fait bouger le stock : seul l'administrateur le peut. */
+/* Commande payée annulée : remboursement à régler ; rétablie avant règlement : il disparaît */
+function suiviAnnulation(avant, apres, userId) {
+  if (!avant || !apres) return;
+  if (apres.statut === "annulee" && avant.statut !== "annulee" && apres.montant_paye != null) {
+    // Solde : payé − déjà à rembourser/remboursé (ou avoir) + compléments encaissés ou à encaisser
+    const deja = db.prepare("SELECT COALESCE(SUM(CASE WHEN sens = 'rembourser' THEN montant ELSE -montant END), 0) AS n FROM reglements_retour WHERE commande_id = ?").get(apres.id).n;
+    require("../lib/caisse").creerReglement(apres.id, Number(apres.montant_paye) - deja, "Commande annulée", userId);
+  }
+  if (avant.statut === "annulee" && apres.statut !== "annulee") db.prepare("DELETE FROM reglements_retour WHERE commande_id = ? AND motif = 'Commande annulée' AND statut = 'a_regler'").run(apres.id);
+}
+const dejaRembourse = (cmd, statut) => cmd?.statut === "annulee" && statut !== "annulee"
+  && db.prepare("SELECT 1 FROM reglements_retour WHERE commande_id = ? AND sens = 'rembourser' AND statut <> 'a_regler' AND motif IN ('Commande annulée', 'Retour complet') LIMIT 1").get(cmd.id);
 const annulationInterdite = (cmd, statut, req) => req.user?.role !== "admin" && (statut === "annulee" || cmd?.statut === "annulee");
 router.patch("/:id/statut", (req, res) => {
   const { statut } = req.body;
@@ -73,8 +85,11 @@ router.patch("/:id/statut", (req, res) => {
     return res.status(400).json({ erreur: `statut doit être l'un de : ${STATUTS_VALIDES.join(", ")}` });
   }
   if (annulationInterdite(lire(req.params.id), statut, req)) return res.status(403).json({ erreur: "Seul l'administrateur peut annuler ou rétablir une commande" });
+  if (dejaRembourse(lire(req.params.id), statut)) return res.status(409).json({ erreur: "Le client a déjà été remboursé : enregistrez une nouvelle vente plutôt que de rétablir cette commande" });
+  const avant = lire(req.params.id);
   const cmd = db.transaction(() => changerStatut(req.params.id, statut, req.user?.id))();
   if (!cmd) return res.status(404).json({ erreur: "Commande introuvable" });
+  suiviAnnulation(avant, cmd, req.user?.id);
   res.json(enrichir(cmd));
 });
 
@@ -86,8 +101,10 @@ router.post("/statut", (req, res) => {
     return res.status(400).json({ erreur: `statut doit être l'un de : ${STATUTS_VALIDES.join(", ")}` });
   }
   if (statut === "annulee" && req.user?.role !== "admin") return res.status(403).json({ erreur: "Seul l'administrateur peut annuler une commande" });
-  const autorises = ids.map(String).filter((id) => { const c = lire(id); return c && aMoi(c, req) && !annulationInterdite(c, statut, req); });
+  const autorises = ids.map(String).filter((id) => { const c = lire(id); return c && aMoi(c, req) && !annulationInterdite(c, statut, req) && !dejaRembourse(c, statut); });
+  const avants = new Map(autorises.map((id) => [id, lire(id)]));
   const modifiees = db.transaction(() => autorises.map((id) => changerStatut(id, statut, req.user?.id)).filter(Boolean))();
+  for (const c of modifiees) suiviAnnulation(avants.get(c.id), c, req.user?.id);
   res.json({ modifiees: modifiees.length });
 });
 
@@ -286,6 +303,7 @@ router.post("/:id/retour", (req, res) => {
       ajouterEvenement(cmd.id, { type: "statut", statut: "annulee", auteurId: req.user?.id });
       ajouterEvenement(cmd.id, { type: "note", auteurId: req.user?.id, texte: `Retour complet${cmd.statut === "livree" ? " après livraison" : ""} : ${nb} article(s) rendu(s) — ${Math.round(total).toLocaleString("fr-FR").replace(/[\u202f\u00a0]/g, " ")} FCFA à rembourser au client.${remis ? " Articles remis en stock." : " Articles non remis en stock."}${remarque ? " " + remarque : ""}` });
     })();
+    require("../lib/caisse").creerReglement(cmd.id, total + (cmd.statut !== "livree" ? Number(cmd.frais_livraison) || 0 : 0), "Retour complet", req.user?.id);
     return res.status(201).json({ commande: enrichir(lire(cmd.id)), difference: total, complet: true });
   }
   const ligne = lignes.find((l) => l.id === req.body.vente_id);
@@ -331,6 +349,7 @@ router.post("/:id/retour", (req, res) => {
       ? `Échange : ${q} × ${nomRendu} rendu contre ${q} × ${nouveau.nom} — ${suite}.${remettre ? "" : " Article rendu non remis en stock."}${note ? " " + note : ""}`
       : `Retour (rétractation) : ${q} × ${nomRendu} — ${suite}.${remettre ? " Remis en stock." : " Non remis en stock."}${note ? " " + note : ""}` });
   })();
+  require("../lib/caisse").creerReglement(cmd.id, difference, motif === "echange" ? "Échange" : "Retour d'article", req.user?.id);
   res.status(201).json({ commande: enrichir(lire(cmd.id)), difference });
 });
 
