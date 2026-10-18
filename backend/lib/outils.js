@@ -39,10 +39,11 @@ function ajouterEvenement(commandeId, { type = "statut", statut = null, texte = 
 
 /**
  * Adresse publique du site : PUBLIC_URL, sinon celle fournie par Render
- * (RENDER_EXTERNAL_URL), sinon l'adresse de la requête.
+ * (RENDER_EXTERNAL_URL), sinon l'adresse de la requête. Jamais l'en-tête Origin, choisi librement
+ * par l'expéditeur : il servirait à glisser un faux site dans les tickets et les retours de paiement.
  */
 function urlPublique(req) {
-  return (process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || req.get("origin") || `${req.protocol}://${req.get("host")}`).replace(/\/$/, "");
+  return (process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || `${req.protocol}://${req.get("host")}`).replace(/\/$/, "");
 }
 
 module.exports = { versIso, idOuNouveau, normTel, prochainNumero, ajouterEvenement, urlPublique };

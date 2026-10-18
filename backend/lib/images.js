@@ -49,11 +49,14 @@ function supprimerImage(url) {
  * URL déjà enregistrée → inchangée.
  */
 function resoudreImage(valeur, ancienne, prefixe) {
+  // Seul le produit qui a créé un fichier peut le supprimer (son nom commence par l'identifiant du produit) :
+  // une URL copiée depuis le catalogue d'un autre espace ne permet donc jamais d'effacer l'image de cet espace.
+  const aMoi = (url) => typeof url === "string" && path.basename(url).startsWith(String(prefixe).replace(/[^A-Za-z0-9_-]/g, "") + "-");
   if (valeur === undefined) return ancienne ?? null;
-  if (valeur === null || valeur === "") { supprimerImage(ancienne); return null; }
+  if (valeur === null || valeur === "") { if (aMoi(ancienne)) supprimerImage(ancienne); return null; }
   if (String(valeur).startsWith("data:")) {
     const url = enregistrerImage(valeur, prefixe);
-    if (ancienne && ancienne !== url) supprimerImage(ancienne);
+    if (ancienne && ancienne !== url && aMoi(ancienne)) supprimerImage(ancienne);
     return url;
   }
   if (String(valeur).startsWith("/uploads/packs/")) return valeur;
