@@ -28,4 +28,14 @@ router.post("/fermer", adminOnly, (req, res) => reponse(res, caisse.fermer(jourV
 router.post("/remises", adminOnly, (req, res) => reponse(res, caisse.remettre(req.body || {}, req.user), 201));
 router.delete("/remises/:id", adminOnly, (req, res) => reponse(res, caisse.annulerRemise(req.params.id)));
 
+// Charges fixes mensuelles estimées (seuil de rentabilité) : jamais transmises aux vendeurs
+const db = require("../db");
+router.get("/charges-fixes", adminOnly, (req, res) => res.json({ montant: Number(db.prepare("SELECT valeur FROM parametres WHERE cle = 'charges_fixes'").get()?.valeur) || 0 }));
+router.put("/charges-fixes", adminOnly, (req, res) => {
+  const m = Math.round(Number(req.body?.montant));
+  if (!(m >= 0) || m > 1e10) return res.status(400).json({ erreur: "Montant invalide" });
+  db.prepare("INSERT INTO parametres (cle, valeur) VALUES ('charges_fixes', ?) ON CONFLICT(cle) DO UPDATE SET valeur = excluded.valeur").run(String(m));
+  res.json({ montant: m });
+});
+
 module.exports = router;

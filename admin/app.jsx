@@ -2622,7 +2622,7 @@ function PageCommandes({ route }) {
 /* =====================================================================
    PAGE : Dépenses (saisies par le vendeur ou l'administrateur)
    ===================================================================== */
-const CATEGORIES_DEPENSE = ["Transport", "Livraison", "Emballage", "Communication", "Repas", "Autre"];
+const CATEGORIES_DEPENSE = ["Transport", "Livraison", "Emballage", "Communication", "Repas", "Loyer", "Salaires", "Électricité et eau", "Abonnements", "Autre"];
 /* =====================================================================
    PAGE : Diagnostics capillaires (administrateur) — bilans reçus depuis la boutique
    ===================================================================== */
@@ -5432,6 +5432,172 @@ function PageRapprochement() {
   );
 }
 
+/* =====================================================================
+   Bilan d'une période, seuil de rentabilité et rapport mensuel
+   ===================================================================== */
+const CATEGORIES_FIXES = ["Loyer", "Salaires", "Électricité et eau", "Abonnements"];
+const MOIS_FR = (m) => new Date(Number(m.slice(0, 4)), Number(m.slice(5, 7)) - 1, 1).toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
+const finDeMois = (m) => isoDate(new Date(Number(m.slice(0, 4)), Number(m.slice(5, 7)), 0));
+const moisPrecedent = (m) => { const d = new Date(Number(m.slice(0, 4)), Number(m.slice(5, 7)) - 2, 1); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`; };
+
+/** Bilan d'une période [de, a] (dates AAAA-MM-JJ) : résultat, trésorerie, détails. */
+function bilanPeriode(data, de, a) {
+  const dans = (j) => j && j >= de && j <= a;
+  const somme = (l, f) => l.reduce((s, x) => s + (f(x) || 0), 0);
+  const cout = (v) => { const c = v.coutUnitaire ?? v.pack?.cout; return c == null ? null : c * v.qte; };
+  const vs = enrichVentes(data).filter((v) => isValid(v) && dans(v.date));
+  const commandes = enrichCommandes(data).filter((c) => c.statut !== "annulee" && dans(c.vente?.date));
+  const depenses = (data.depenses || []).filter((d) => dans(d.date));
+  const ca = somme(vs, (v) => v.total), livraison = somme(commandes, (c) => c.fraisLivraison);
+  const coutMarch = somme(vs, cout);
+  const depFixes = somme(depenses.filter((d) => CATEGORIES_FIXES.includes(d.categorie)), (d) => d.montant);
+  const depVariables = somme(depenses.filter((d) => !CATEGORIES_FIXES.includes(d.categorie)), (d) => d.montant);
+  const depParCat = Object.entries(depenses.reduce((m, d) => ({ ...m, [d.categorie]: (m[d.categorie] || 0) + d.montant }), {})).sort((x, y) => y[1] - x[1]);
+  const encaisse = somme(vs.filter((v) => v.statutPaiement === "payee"), (v) => v.total);
+  const parMoyen = Object.entries(vs.filter((v) => v.statutPaiement === "payee").reduce((m, v) => { const k = infoPaiement(v.paiement).court; return { ...m, [k]: (m[k] || 0) + v.total }; }, {})).sort((x, y) => y[1] - x[1]);
+  const pv = new Map(), pp = new Map();
+  vs.forEach((v) => {
+    const k = v.vendeurId || "boutique"; const o = pv.get(k) || { nom: v.vendeur || "Boutique en ligne", ventes: 0, n: new Set() }; o.ventes += v.total; o.n.add(v.commandeId || v.id); pv.set(k, o);
+    const p = pp.get(v.packId) || { nom: v.pack?.nom || "Produit supprimé", qte: 0, ca: 0, cout: 0, inconnu: false }; p.qte += v.qte; p.ca += v.total; const c = cout(v); if (c == null) p.inconnu = true; else p.cout += c; pp.set(v.packId, p);
+  });
+  const nbCommandes = new Set(vs.map((v) => v.commandeId || v.id)).size;
+  const margeBrute = ca - coutMarch;
+  return { ca, livraison, coutMarch, margeBrute, depFixes, depVariables, depenses: depFixes + depVariables, depParCat, benef: margeBrute + livraison - depFixes - depVariables,
+    encaisse, aEncaisser: ca - encaisse, parMoyen, nbCommandes, panier: nbCommandes ? (ca + livraison) / nbCommandes : 0, sansCout: vs.filter((v) => cout(v) == null).length,
+    parVendeur: [...pv.values()].map((o) => ({ ...o, n: o.n.size })).sort((x, y) => y.ventes - x.ventes),
+    parProduit: [...pp.values()].sort((x, y) => y.ca - x.ca) };
+}
+
+/** Seuil de rentabilité du mois : chiffre d'affaires à atteindre pour couvrir les charges fixes. */
+function calculSeuil(data, fixesSaisies) {
+  const T0 = today(), auj = isoDate(T0), mois = auj.slice(0, 7);
+  const ref = bilanPeriode(data, isoDate(addDays(T0, -89)), auj); // taux de marge sur 90 jours, plus stable
+  const recettes = ref.ca + ref.livraison;
+  const taux = recettes > 0 ? (recettes - ref.coutMarch - ref.depVariables) / recettes : null;
+  const m = bilanPeriode(data, mois + "-01", auj);
+  const fixes = Math.max(Number(fixesSaisies) || 0, m.depFixes);
+  const seuil = taux > 0 ? fixes / taux : null;
+  const realise = m.ca + m.livraison;
+  const jour = T0.getDate(), jours = new Date(T0.getFullYear(), T0.getMonth() + 1, 0).getDate();
+  const projection = jour ? (realise / jour) * jours : 0;
+  return { taux, fixes, seuil, realise, reste: seuil != null ? Math.max(0, seuil - realise) : null, panier: ref.panier, projection, mois, jour, jours };
+}
+
+function CarteSeuil() {
+  const { data, toast } = useApp();
+  const [fixes, setFixes] = useState(null);
+  const [saisie, setSaisie] = useState("");
+  const [edition, setEdition] = useState(false);
+  useEffect(() => { apiFetch("GET", "/api/caisse/charges-fixes").then((r) => { setFixes(r.montant || 0); setSaisie(String(r.montant || "")); }).catch(() => setFixes(0)); }, []);
+  const s = useMemo(() => calculSeuil(data, fixes), [data, fixes]);
+  const enregistrer = async () => {
+    try { const r = await apiFetch("PUT", "/api/caisse/charges-fixes", { montant: Number(saisie) || 0 }); setFixes(r.montant); setEdition(false); toast({ title: "Charges fixes enregistrées" }); }
+    catch (e) { toast({ title: "Enregistrement impossible", desc: e.message, tone: "critical" }); }
+  };
+  if (fixes === null) return null;
+  const pctAtteint = s.seuil ? Math.min(100, (s.realise / s.seuil) * 100) : 0;
+  return (
+    <Card title="Seuil de rentabilité" sub={`${MOIS_FR(s.mois)} : chiffre d'affaires à atteindre pour couvrir vos charges fixes`} style={{ marginTop: 16 }}
+      actions={<Btn size="sm" onClick={() => setEdition((x) => !x)}>{edition ? "Fermer" : "Charges fixes"}</Btn>}>
+      {(edition || !s.fixes) && (
+        <div className="stack" style={{ marginBottom: 14 }}>
+          <Field label="Charges fixes par mois" help="Ce que vous payez même sans vendre : loyer, salaires, électricité et eau, abonnements. Les dépenses de ces catégories enregistrées ce mois-ci sont prises en compte si elles sont plus élevées.">
+            <Input value={saisie} onChange={(e) => setSaisie(e.target.value.replace(/[^\d]/g, ""))} suffix="FCFA" inputMode="numeric" />
+          </Field>
+          <div className="row" style={{ justifyContent: "flex-end" }}><Btn variant="primary" onClick={enregistrer}>Enregistrer</Btn></div>
+        </div>
+      )}
+      {!s.fixes ? <p className="subtle" style={{ margin: 0 }}>Indiquez vos charges fixes mensuelles pour calculer votre seuil.</p>
+        : s.taux == null || s.taux <= 0 ? <div className="banner banner-warning"><AlertTriangle size={16} /><div>{s.taux == null ? "Pas encore assez de ventes sur 90 jours pour calculer votre marge." : "Sur 90 jours, vos coûts variables dépassent vos ventes : chaque vente vous coûte de l'argent. Revoyez vos prix ou vos coûts d'achat."}</div></div>
+        : (
+          <div className="stack">
+            <div className="row-between"><span className="subtle">Seuil du mois</span><b className="num" style={{ fontSize: 22 }}>{fmt(s.seuil)}</b></div>
+            <div className="progress" style={{ height: 10 }}><span style={{ width: `${pctAtteint}%`, background: pctAtteint >= 100 ? "var(--success-dot)" : undefined }} /></div>
+            <div className="row-between"><span className="subtle">Réalisé : <b className="num">{fmt(s.realise)}</b> ({Math.round(pctAtteint)} %)</span><span className="subtle">Jour {s.jour} / {s.jours}</span></div>
+            {s.reste > 0 ? (
+              <div className="banner banner-info"><Info size={16} /><div>Il reste <b className="num">{fmt(s.reste)}</b> à vendre ce mois-ci{s.panier ? <>, soit environ <b>{Math.ceil(s.reste / s.panier)} commande{Math.ceil(s.reste / s.panier) > 1 ? "s" : ""}</b> au panier moyen de {fmt(s.panier)}</> : null}. À ce rythme, vous finirez le mois à <b className="num">{fmt(s.projection)}</b>{s.projection >= s.seuil ? " : seuil atteint." : ` (${Math.round((s.projection / s.seuil) * 100)} % du seuil).`}</div></div>
+            ) : <div className="banner banner-success"><CheckCircle2 size={16} /><div>Seuil atteint : chaque vente supplémentaire de ce mois est du bénéfice (marge de {Math.round(s.taux * 100)} % sur les coûts variables).</div></div>}
+            <p className="subtle" style={{ margin: 0 }}>Calcul : charges fixes {fmt(s.fixes)} ÷ taux de marge sur coûts variables {Math.round(s.taux * 100)} % (90 derniers jours).</p>
+          </div>
+        )}
+    </Card>
+  );
+}
+
+/* Rapport mensuel : à l'écran, et en PDF par « Imprimer › Enregistrer au format PDF » */
+function ContenuRapport({ data, mois, b, prec, seuil, extra }) {
+  const ev = (x, y) => (y ? (x - y) / Math.abs(y) * 100 : null);
+  const evol = (x, y) => { const e = ev(x, y); return e == null ? "" : ` (${e >= 0 ? "+" : "−"}${Math.abs(Math.round(e))} %)`; };
+  const L = ({ label, v, w, gras, neg }) => <tr className={gras ? "gras" : ""}><td>{label}</td><td className="d">{neg && v ? "−" : ""}{fmt(Math.abs(v))}</td><td className="d gris">{w}</td></tr>;
+  return (
+    <div className="rapport">
+      <header className="rapport-tete">
+        <div><div className="rapport-boutique">{data.boutique?.nom || "Ma boutique"}</div><div className="gris">{[data.boutique?.adresse, data.boutique?.telephone].filter(Boolean).join(" · ")}</div></div>
+        <div className="d"><div className="rapport-titre">Rapport de {MOIS_FR(mois)}</div><div className="gris">Établi le {new Date().toLocaleDateString("fr-FR")}</div></div>
+      </header>
+      <h3>Résultat</h3>
+      <table><tbody>
+        <L label="Chiffre d'affaires (produits)" v={b.ca} w={"mois précédent " + fmt(prec.ca) + evol(b.ca, prec.ca)} />
+        <L label="Frais de livraison facturés" v={b.livraison} />
+        <L label="Coût des marchandises vendues" v={b.coutMarch} neg />
+        <L label="Marge brute" v={b.margeBrute} w={b.ca ? Math.round((b.margeBrute / b.ca) * 100) + " % du CA" : ""} gras />
+        <L label="Charges variables (transport, emballage…)" v={b.depVariables} neg />
+        <L label="Charges fixes (loyer, salaires…)" v={b.depFixes} neg />
+        <L label="Bénéfice net" v={b.benef} w={"mois précédent " + fmt(prec.benef)} gras neg={b.benef < 0} />
+      </tbody></table>
+      {b.sansCout > 0 && <p className="gris">⚠ {b.sansCout} vente(s) sans coût d'achat : le bénéfice est surestimé.</p>}
+      <h3>Activité et trésorerie</h3>
+      <table><tbody>
+        <tr><td>Commandes</td><td className="d">{b.nbCommandes}</td><td className="d gris">{"mois précédent " + prec.nbCommandes}</td></tr>
+        <tr><td>Panier moyen</td><td className="d">{fmt(b.panier)}</td><td /></tr>
+        <L label="Encaissé" v={b.encaisse} />
+        <L label="Reste à encaisser" v={b.aEncaisser} />
+        {b.parMoyen.map(([m, v]) => <L key={m} label={"   dont " + m} v={v} />)}
+      </tbody></table>
+      {seuil?.seuil && mois === seuil.mois && <><h3>Seuil de rentabilité</h3><p>Seuil du mois : <b>{fmt(seuil.seuil)}</b> (charges fixes {fmt(seuil.fixes)}, marge sur coûts variables {Math.round(seuil.taux * 100)} %). Réalisé : <b>{fmt(seuil.realise)}</b> — {seuil.reste > 0 ? `reste ${fmt(seuil.reste)} à vendre.` : "seuil atteint."}</p></>}
+      {b.depParCat.length > 0 && <><h3>Dépenses par catégorie</h3><table><tbody>{b.depParCat.map(([c, v]) => <L key={c} label={c + (CATEGORIES_FIXES.includes(c) ? " (fixe)" : "")} v={v} />)}</tbody></table></>}
+      <h3>Produits</h3>
+      <table><thead><tr><th>Produit</th><th className="d">Vendus</th><th className="d">CA</th><th className="d">Marge</th></tr></thead>
+        <tbody>{b.parProduit.slice(0, 15).map((p) => <tr key={p.nom}><td>{p.nom}</td><td className="d">{p.qte}</td><td className="d">{fmt(p.ca)}</td><td className="d">{p.inconnu ? "—" : fmt(p.ca - p.cout)}</td></tr>)}</tbody></table>
+      {b.parVendeur.length > 1 && <><h3>Vendeurs</h3><table><tbody>{b.parVendeur.map((v) => <tr key={v.nom}><td>{v.nom}</td><td className="d">{v.n} commande(s)</td><td className="d">{fmt(v.ventes)}</td></tr>)}</tbody></table></>}
+      {extra?.caisses?.length > 0 && <><h3>Caisse</h3><p>{extra.caisses.length} journée(s) fermée(s) · écart cumulé <b>{fmt(extra.caisses.reduce((s, c) => s + (c.ecart || 0), 0))}</b>{extra.caisses.filter((c) => c.ecart).length ? ` · ${extra.caisses.filter((c) => c.ecart).length} jour(s) avec écart` : " · aucun écart"}.</p></>}
+      {extra?.mm && <><h3>Contrôle Mobile Money</h3><p>{Object.values(extra.mm.resume).reduce((s, n) => s + n, 0)} paiement(s) Mobile Money · rapprochés : <b>{extra.mm.resume.rapproche || 0}</b> · à examiner : <b>{(extra.mm.resume.ecart || 0) + (extra.mm.resume.introuvable || 0) + (extra.mm.resume.doublon || 0) + (extra.mm.resume.sans_reference || 0)}</b>{extra.mm.sans_commande.length ? ` · reçus sans commande : ${extra.mm.sans_commande.length}` : ""}.</p></>}
+      <footer className="gris">Rapport établi automatiquement à partir des ventes, dépenses et caisses enregistrées.</footer>
+    </div>
+  );
+}
+
+function PageRapport({ mois: moisRoute }) {
+  const { data, go } = useApp();
+  const auj = isoDate(new Date());
+  const mois = /^\d{4}-\d{2}$/.test(moisRoute || "") ? moisRoute : auj.slice(0, 7);
+  const [fixes, setFixes] = useState(0);
+  const [extra, setExtra] = useState({});
+  const de = mois + "-01", a = finDeMois(mois) < auj ? finDeMois(mois) : auj;
+  useEffect(() => {
+    apiFetch("GET", "/api/caisse/charges-fixes").then((r) => setFixes(r.montant || 0)).catch(() => {});
+    Promise.all([apiFetch("GET", `/api/rapprochement?de=${de}&a=${a}`).catch(() => null), apiFetch("GET", "/api/caisse").catch(() => null)])
+      .then(([mm, c]) => setExtra({ mm, caisses: (c?.historique || []).filter((h) => h.fermee_le && h.jour.startsWith(mois)) }));
+  }, [mois]);
+  const b = useMemo(() => bilanPeriode(data, de, a), [data, de, a]);
+  const prec = useMemo(() => { const p = moisPrecedent(mois); return bilanPeriode(data, p + "-01", finDeMois(p)); }, [data, mois]);
+  const seuil = useMemo(() => calculSeuil(data, fixes), [data, fixes]);
+  const choix = [...Array(12)].map((_, k) => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - k); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`; });
+  const contenu = <ContenuRapport data={data} mois={mois} b={b} prec={prec} seuil={seuil} extra={extra} />;
+  return (
+    <>
+      <PageHeader title="Rapport mensuel" back={() => go("finances")} meta={MOIS_FR(mois)}
+        actions={<>
+          <Select value={mois} onChange={(e) => go("rapport", e.target.value)} style={{ width: 190 }} aria-label="Mois">{choix.map((m) => <option key={m} value={m}>{MOIS_FR(m)}</option>)}</Select>
+          <Btn variant="primary" icon={Download} onClick={() => window.print()}>Télécharger en PDF</Btn>
+        </>} />
+      <p className="subtle" style={{ marginTop: -6 }}>« Télécharger en PDF » ouvre l'impression : choisissez « Enregistrer au format PDF » comme imprimante.</p>
+      <Card>{contenu}</Card>
+      {createPortal(<div className="print-zone rapport-impression">{contenu}</div>, document.body)}
+    </>
+  );
+}
+
 function PageFinances({ route }) {
   const { data, update, sync, go, toast, confirm } = useApp();
   const [periode, setPeriode] = useState("mois");
@@ -5548,6 +5714,7 @@ function PageFinances({ route }) {
             <option value="mois">Ce mois-ci</option><option value="mois_prec">Mois dernier</option><option value="90">90 derniers jours</option><option value="365">12 derniers mois</option><option value="tout">Depuis le début</option>
           </Select>
           <Btn icon={Download} onClick={exporter} disabled={!r.vs.length && !r.depenses.length}>Exporter</Btn>
+          <Btn variant="primary" icon={FileText} onClick={() => go("rapport", (periode === "mois_prec" ? bornes.de : isoDate(T0)).slice(0, 7))}>Rapport du mois</Btn>
         </>} />
 
       <div className="titre-section">Résultat</div>
@@ -5598,6 +5765,8 @@ function PageFinances({ route }) {
           )}
         </Card>
       </div>
+
+      <CarteSeuil />
 
       <Card title="Investissements" sub="Capital engagé dans la boutique (stock de départ, matériel, travaux…), récupéré au fil des bénéfices" style={{ marginTop: 16 }} padded={false}
         actions={<Btn variant="primary" icon={Plus} onClick={() => go("finances", "nouveau")}>Ajouter</Btn>}>
@@ -6379,6 +6548,7 @@ function App() {
     case "finances": content = estAdmin ? <PageFinances route={route} /> : <AccesReserve />; break;
     case "caisse": content = estAdmin ? <PageCaisse /> : <AccesReserve />; break;
     case "mobile-money": content = estAdmin ? <PageRapprochement /> : <AccesReserve />; break;
+    case "rapport": content = estAdmin ? <PageRapport mois={route.id} /> : <AccesReserve />; break;
     case "vendeurs": content = estAdmin ? <PageVendeurs /> : <AccesReserve />; break;
     case "tickets": content = <PageTickets route={route} />; break;
     case "livraisons": content = <PageLivraisons />; break;

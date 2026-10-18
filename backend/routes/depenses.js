@@ -9,7 +9,7 @@ const { nanoid } = require("nanoid");
 const db = require("../db");
 const router = express.Router();
 
-const CATEGORIES = ["Transport", "Livraison", "Emballage", "Communication", "Repas", "Autre"];
+const CATEGORIES = ["Transport", "Livraison", "Emballage", "Communication", "Repas", "Loyer", "Salaires", "Électricité et eau", "Abonnements", "Autre"];
 const lister = (user) => db.prepare("SELECT d.*, u.nom AS auteur FROM depenses d LEFT JOIN utilisateurs u ON u.id = d.auteur_id ORDER BY d.date_depense DESC, d.cree_le DESC").all()
   .filter((d) => user.role === "admin" || d.auteur_id === user.id);
 

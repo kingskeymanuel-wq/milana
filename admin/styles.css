@@ -1661,3 +1661,25 @@ body { background: transparent; }
 /* Finances : intertitres de section */
 .titre-section { margin: 18px 2px 10px; font-size: 12.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--text-3); }
 .titre-section:first-of-type { margin-top: 4px; }
+
+/* Rapport mensuel (écran et impression A4) */
+.rapport { font-size: 14px; }
+.rapport-tete { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding-bottom: 12px; border-bottom: 2px solid var(--brand); margin-bottom: 6px; }
+.rapport-boutique { font-size: 18px; font-weight: 700; }
+.rapport-titre { font-size: 16px; font-weight: 700; color: var(--brand-strong); }
+.rapport h3 { font-size: 13px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); margin: 18px 0 6px; }
+.rapport table { width: 100%; border-collapse: collapse; }
+.rapport td, .rapport th { padding: 6px 4px; border-bottom: 1px solid var(--divider); text-align: left; font-variant-numeric: tabular-nums; }
+.rapport th { font-size: 12px; color: var(--text-3); font-weight: 600; }
+.rapport .d { text-align: right; white-space: nowrap; }
+.rapport .gris { color: var(--text-3); font-size: 12.5px; }
+.rapport tr.gras td { font-weight: 700; }
+.rapport footer { margin-top: 18px; }
+@media print {
+  .print-zone.rapport-impression { display: block; width: auto; margin: 0; padding: 8mm 10mm; color: #000; font-family: Arial, Helvetica, sans-serif; }
+  .rapport-impression .rapport { font-size: 11.5px; }
+  .rapport-impression .rapport td, .rapport-impression .rapport th { border-bottom-color: #ccc; padding: 4px 3px; }
+  .rapport-impression .rapport .gris, .rapport-impression .rapport h3 { color: #555; }
+  .rapport-impression .rapport-tete { border-bottom-color: #B8862B; }
+  .rapport-impression h3, .rapport-impression tr { break-inside: avoid; }
+}
