@@ -122,7 +122,7 @@ function downloadFile(name, content, type) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 function toCsv(rows) {
-  const esc = (v) => { const s = String(v ?? ""); return /[;"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const esc = (v) => { let s = String(v ?? ""); if (/^\s*[=+\-@\t\r]/.test(s) && !/^-?\d+([.,]\d+)?$/.test(s.trim())) s = "'" + s; return /[;"\n']/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
   return "﻿" + rows.map((r) => r.map(esc).join(";")).join("\n");
 }
 
@@ -357,7 +357,7 @@ function depuisServeur(p) {
   const ventes = p.ventes.map((v) => {
     const d = new Date(v.date_vente);
     return {
-      id: v.id, commandeId: v.commande_id || null, clientId: v.client_id, packId: v.pack_id, vendeurId: v.vendeur_id || null, qte: v.quantite, prixUnitaire: v.prix_unitaire, prixCatalogue: v.prix_catalogue ?? null, date: isoDate(d), heure: hhmm(d),
+      id: v.id, commandeId: v.commande_id || null, clientId: v.client_id, packId: v.pack_id, vendeurId: v.vendeur_id || null, qte: v.quantite, prixUnitaire: v.prix_unitaire, prixCatalogue: v.prix_catalogue ?? null, coutUnitaire: v.cout_unitaire ?? null, date: isoDate(d), heure: hhmm(d),
       paiement: v.mode_paiement, statutPaiement: v.statut_paiement || "payee", montantRecu: v.montant_recu ?? null,
       telPaiement: v.telephone_paiement || "", reference: v.reference_paiement || "", payeLe: v.paye_le || null, vendeur: v.vendeur_nom || "",
     };
@@ -533,7 +533,8 @@ function computeDashboard(d, days) {
   const sum = (a) => a.reduce((s, v) => s + v.total, 0);
 
   const byDay = new Map();
-  vs.forEach((v) => { const o = byDay.get(v.date) || { t: 0, n: 0, q: 0 }; o.t += v.total; o.n += 1; o.q += v.qte; byDay.set(v.date, o); });
+  const cleCmd = (v) => v.commandeId || v.commande?.id || v.id;
+  vs.forEach((v) => { const o = byDay.get(v.date) || { t: 0, n: 0, q: 0, c: new Set() }; o.t += v.total; o.c.add(cleCmd(v)); o.n = o.c.size; o.q += v.qte; byDay.set(v.date, o); });
   const newByDay = new Map();
   d.clients.forEach((c) => c.dateAjout && newByDay.set(c.dateAjout, (newByDay.get(c.dateAjout) || 0) + 1));
 
@@ -545,7 +546,7 @@ function computeDashboard(d, days) {
   });
 
   const ca = sum(cur), caPrev = sum(prev);
-  const nb = cur.length, nbPrev = prev.length;
+  const nb = new Set(cur.map(cleCmd)).size, nbPrev = new Set(prev.map(cleCmd)).size;
   const panier = nb ? ca / nb : 0, panierPrev = nbPrev ? caPrev / nbPrev : 0;
   const nc = d.clients.filter((c) => c.dateAjout && inR(c.dateAjout, start, T0)).length;
   const ncPrev = d.clients.filter((c) => c.dateAjout && inR(c.dateAjout, pStart, addDays(start, -1))).length;
@@ -3645,7 +3646,10 @@ function PageVentes() {
   const pg = usePaged(rows, 20, q + pay + period + sort.sort.key + sort.sort.dir);
 
   const exporter = () => {
-    downloadFile(`ventes-${isoDate(new Date())}.csv`, toCsv([["Date", "Heure", "Commande", "Client", "Produit", "Quantité", "Prix unitaire", "Montant", "Paiement", "Statut", "Statut paiement", "Référence", "N° payeur", "Montant reçu"], ...rows.map((v) => [v.date, v.heure || "", v.commande?.numero || "", v.client?.nom || "", v.pack?.nom || "", v.qte, v.prixUnitaire, v.total, v.paiement, STATUTS[v.commande?.statut]?.label || "", v.statutPaiement === "en_attente" ? "En attente" : "Payé", v.reference || "", v.telPaiement || "", v.montantRecu ?? ""])]), "text/csv;charset=utf-8");
+    // Le montant reçu concerne toute la commande : on ne le répète pas sur chaque ligne (sinon une somme le compterait plusieurs fois)
+    const vus = new Set();
+    const premiereLigne = (v) => { const k = v.commandeId || v.commande?.id || v.id; if (vus.has(k)) return false; vus.add(k); return true; };
+    downloadFile(`ventes-${isoDate(new Date())}.csv`, toCsv([["Date", "Heure", "Commande", "Client", "Produit", "Quantité", "Prix unitaire", "Montant", "Paiement", "Statut", "Statut paiement", "Référence", "N° payeur", "Montant reçu"], ...rows.map((v) => [v.date, v.heure || "", v.commande?.numero || "", v.client?.nom || "", v.pack?.nom || "", v.qte, v.prixUnitaire, v.total, v.paiement, STATUTS[v.commande?.statut]?.label || "", ({ payee: "Payé", a_verifier: "À vérifier", en_cours: "En cours", echoue: "Échoué" })[v.statutPaiement] || "En attente", v.reference || "", v.telPaiement || "", premiereLigne(v) ? v.montantRecu ?? "" : ""])]), "text/csv;charset=utf-8");
     toast({ title: "Export terminé", desc: `${rows.length} vente(s)` });
   };
 
@@ -5086,92 +5090,191 @@ function PageMarketing({ route }) {
    ===================================================================== */
 function PageFinances({ route }) {
   const { data, update, sync, go, toast, confirm } = useApp();
-  const [cat, setCat] = useState("");
+  const [periode, setPeriode] = useState("mois");
   const [editing, setEditing] = useState(null);
-  const vs = useMemo(() => enrichVentes(data).filter(isValid), [data]);
-  const ca = vs.reduce((s, v) => s + v.total, 0);
+  const T0 = today();
+  // Bornes de la période choisie (dates AAAA-MM-JJ, comparables en texte)
+  const bornes = useMemo(() => {
+    const iso = (d) => isoDate(d), auj = iso(T0);
+    if (periode === "mois") return { de: auj.slice(0, 8) + "01", a: auj, titre: "ce mois-ci" };
+    if (periode === "mois_prec") { const d = new Date(T0.getFullYear(), T0.getMonth() - 1, 1), f = new Date(T0.getFullYear(), T0.getMonth(), 0); return { de: iso(d), a: iso(f), titre: d.toLocaleDateString("fr-FR", { month: "long", year: "numeric" }) }; }
+    if (periode === "90") return { de: iso(addDays(T0, -89)), a: auj, titre: "sur 90 jours" };
+    if (periode === "365") return { de: iso(addDays(T0, -364)), a: auj, titre: "sur 12 mois" };
+    return { de: "0000-00-00", a: "9999-99-99", titre: "depuis le début" };
+  }, [periode, isoDate(T0)]);
+  const dans = (date) => date >= bornes.de && date <= bornes.a;
+
+  const toutes = useMemo(() => enrichVentes(data).filter(isValid), [data]);
+  const cout = (v) => { const c = v.coutUnitaire ?? v.pack?.cout; return c == null ? null : c * v.qte; };
+  const r = useMemo(() => {
+    const vs = toutes.filter((v) => dans(v.date));
+    const somme = (l, f) => l.reduce((s, x) => s + (f(x) || 0), 0);
+    const ca = somme(vs, (v) => v.total);
+    const sansCout = vs.filter((v) => cout(v) == null);
+    const coutMarch = somme(vs, cout);
+    const depenses = (data.depenses || []).filter((d) => dans(d.date));
+    const totalDepenses = somme(depenses, (d) => d.montant);
+    const encaisse = somme(vs.filter((v) => v.statutPaiement === "payee"), (v) => v.total);
+    const aEncaisser = somme(vs.filter((v) => v.statutPaiement !== "payee"), (v) => v.total);
+    const aVerifier = somme(vs.filter((v) => v.statutPaiement === "a_verifier"), (v) => v.total);
+    // Frais de livraison facturés : à part, ils ne sont pas du chiffre d'affaires sur les produits
+    const commandes = enrichCommandes(data).filter((c) => c.statut !== "annulee" && c.vente?.date && dans(c.vente.date));
+    const livraison = somme(commandes, (c) => c.fraisLivraison);
+    // Une commande est encaissée quand toutes ses lignes le sont : ses frais de livraison suivent le même sort
+    const payeeCmd = (c) => { const l = vs.filter((v) => v.commandeId === c.id || v.id === c.venteId); return l.length > 0 && l.every((v) => v.statutPaiement === "payee"); };
+    const livraisonEncaissee = somme(commandes.filter(payeeCmd), (c) => c.fraisLivraison);
+    // Encaissements par moyen de paiement (argent réellement reçu)
+    const parMoyen = new Map();
+    vs.filter((v) => v.statutPaiement === "payee").forEach((v) => { const p = infoPaiement(v.paiement); const o = parMoyen.get(p.key) || { label: p.court, color: p.color, value: 0, n: 0 }; o.value += v.total; o.n += 1; parMoyen.set(p.key, o); });
+    // Par vendeur : ce qu'il a vendu, encaissé, et ce qui reste à encaisser
+    const parVendeur = new Map();
+    vs.forEach((v) => { const k = v.vendeurId || "boutique"; const o = parVendeur.get(k) || { nom: v.vendeur || (k === "boutique" ? "Boutique en ligne / sans vendeur" : "Vendeur"), ventes: 0, encaisse: 0, attente: 0, n: 0 }; o.ventes += v.total; o.n += 1; if (v.statutPaiement === "payee") o.encaisse += v.total; else o.attente += v.total; parVendeur.set(k, o); });
+    // Marge par produit
+    const parProduit = new Map();
+    vs.forEach((v) => { const o = parProduit.get(v.packId) || { pack: v.pack, qte: 0, ca: 0, cout: 0, inconnu: false }; o.qte += v.qte; o.ca += v.total; const c = cout(v); if (c == null) o.inconnu = true; else o.cout += c; parProduit.set(v.packId, o); });
+    const margeBrute = ca - coutMarch;
+    return { nbCommandes: new Set(vs.map((v) => v.commandeId || v.commande?.id || v.id)).size, vs, ca, coutMarch, sansCout, depenses, totalDepenses, encaisse, aEncaisser, aVerifier, livraison, margeBrute, benef: margeBrute + livraison - totalDepenses, encaisseTotal: encaisse + livraisonEncaissee, aEncaisserTotal: aEncaisser + (livraison - livraisonEncaissee),
+      parMoyen: [...parMoyen.values()].sort((a, b) => b.value - a.value), parVendeur: [...parVendeur.values()].sort((a, b) => b.ventes - a.ventes),
+      parProduit: [...parProduit.values()].filter((p) => p.pack).sort((a, b) => (b.ca - b.cout) - (a.ca - a.cout)) };
+  }, [toutes, data.depenses, data.commandes, bornes]);
+
+  // Capital engagé et part déjà récupérée par les bénéfices (depuis le début)
   const invest = data.investissements.reduce((s, i) => s + i.montant, 0);
-  const benef = ca - invest;
-  const roi = invest ? (benef / invest) * 100 : 0;
-  const coutMarchandises = vs.reduce((s, v) => s + (v.pack?.cout ? v.pack.cout * v.qte : 0), 0);
-  const margeBrute = ca - coutMarchandises;
+  const benefTotal = useMemo(() => {
+    const ca = toutes.reduce((s, v) => s + v.total, 0), c = toutes.reduce((s, v) => s + (cout(v) || 0), 0);
+    const liv = enrichCommandes(data).filter((x) => x.statut !== "annulee").reduce((s, x) => s + (x.fraisLivraison || 0), 0);
+    return ca + liv - c - (data.depenses || []).reduce((s, d) => s + d.montant, 0);
+  }, [toutes, data.depenses]);
+  const recupere = invest > 0 ? Math.max(0, Math.min(100, (benefTotal / invest) * 100)) : null;
 
-  const months = useMemo(() => {
-    const now = new Date();
-    return [...Array(6)].map((_, k) => {
-      const d = new Date(now.getFullYear(), now.getMonth() - (5 - k), 1);
-      const key = `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
-      return {
-        label: d.toLocaleDateString("fr-FR", { month: "short" }).replace(".", ""),
-        full: d.toLocaleDateString("fr-FR", { month: "long", year: "numeric" }),
-        values: [
-          vs.filter((v) => v.date.startsWith(key)).reduce((s, v) => s + v.total, 0),
-          data.investissements.filter((i) => i.date.startsWith(key)).reduce((s, i) => s + i.montant, 0),
-        ],
-      };
-    });
-  }, [vs, data.investissements]);
+  const months = useMemo(() => [...Array(6)].map((_, k) => {
+    const d = new Date(T0.getFullYear(), T0.getMonth() - (5 - k), 1);
+    const key = `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+    const vs = toutes.filter((v) => v.date.startsWith(key));
+    const ca = vs.reduce((s, v) => s + v.total, 0);
+    const charges = vs.reduce((s, v) => s + (cout(v) || 0), 0) + (data.depenses || []).filter((x) => x.date.startsWith(key)).reduce((s, x) => s + x.montant, 0);
+    const liv = enrichCommandes(data).filter((x) => x.statut !== "annulee" && x.vente?.date?.startsWith(key)).reduce((s, x) => s + (x.fraisLivraison || 0), 0);
+    return { label: d.toLocaleDateString("fr-FR", { month: "short" }).replace(".", ""), full: d.toLocaleDateString("fr-FR", { month: "long", year: "numeric" }), values: [ca, charges], benef: ca + liv - charges };
+  }), [toutes, data.depenses]);
 
-  const byCat = CATEGORIES.map((c) => ({ label: c.key, color: c.color, value: data.investissements.filter((i) => i.categorie === c.key).reduce((s, i) => s + i.montant, 0) })).filter((c) => c.value > 0);
-  const rows = [...data.investissements].filter((i) => !cat || i.categorie === cat).sort((a, b) => b.date.localeCompare(a.date));
+  const rows = [...data.investissements].sort((a, b) => b.date.localeCompare(a.date));
   const remove = async (i) => {
-    if (!(await confirm({ title: "Supprimer cette dépense ?", message: `« ${i.libelle} » (${fmt(i.montant)}) sera supprimée.`, confirmLabel: "Supprimer", tone: "critical" }))) return;
+    if (!(await confirm({ title: "Supprimer cet investissement ?", message: `« ${i.libelle} » (${fmt(i.montant)}) sera supprimé.`, confirmLabel: "Supprimer", tone: "critical" }))) return;
     update((d) => ({ ...d, investissements: d.investissements.filter((x) => x.id !== i.id) }));
     sync(["DELETE", `/api/investissements/${i.id}`]);
-    toast({ title: "Dépense supprimée" });
+    toast({ title: "Investissement supprimé" });
   };
 
-  const kpis = [
-    { label: "Chiffre d'affaires", value: ca, f: fmt, icon: TrendingUp, tint: 4 },
-    { label: "Total investi", value: invest, f: fmt, icon: Wallet, tint: 3 },
-    { label: "Bénéfice net", value: benef, f: fmt, icon: Landmark, tint: benef >= 0 ? 0 : 3, color: benef >= 0 ? "var(--success-dot)" : "var(--critical-solid)" },
-    { label: "Retour sur investissement", value: roi, f: pct, icon: Sparkles, tint: 5, color: roi >= 0 ? "var(--success-dot)" : "var(--critical-solid)" },
+  // Export du détail de la période (ouvre dans Excel) ; cellules neutralisées contre les formules
+  const exporter = () => {
+    const cel = (x) => { let s = String(x ?? ""); if (/^\s*[=+\-@\t\r]/.test(s) && !/^-?\d+([.,]\d+)?$/.test(s.trim())) s = "'" + s; return '"' + s.replace(/"/g, '""') + '"'; };
+    const lignes = [["Date", "Commande", "Produit", "Quantité", "Prix unitaire", "Total", "Coût d'achat", "Marge", "Paiement", "Statut du paiement", "Vendeur"],
+      ...r.vs.map((v) => { const c = cout(v); return [v.date, v.commande?.numero || "", v.pack?.nom || "", v.qte, v.prixUnitaire, v.total, c ?? "", c == null ? "" : v.total - c, infoPaiement(v.paiement).court, v.statutPaiement === "payee" ? "Encaissé" : v.statutPaiement === "a_verifier" ? "À vérifier" : "À encaisser", v.vendeur || ""]; }),
+      [], ["Dépenses"], ...r.depenses.map((d) => [d.date, "", d.libelle, "", "", -d.montant, "", "", d.categorie, "", d.auteur || ""]),
+      [], ["Chiffre d'affaires", r.ca], ["Coût des marchandises", r.coutMarch], ["Dépenses", r.totalDepenses], ["Frais de livraison facturés", r.livraison], ["Bénéfice net", r.benef], ["Encaissé (livraison comprise)", r.encaisseTotal], ["À encaisser (livraison comprise)", r.aEncaisserTotal]];
+    const url = URL.createObjectURL(new Blob(["\ufeff" + lignes.map((l) => l.map(cel).join(";")).join("\r\n")], { type: "text/csv;charset=utf-8" }));
+    const a = document.createElement("a"); a.href = url; a.download = `finances-${bornes.de === "0000-00-00" ? "tout" : bornes.de}-${bornes.a === "9999-99-99" ? isoDate(T0) : bornes.a}.csv`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 2000);
+  };
+
+  const pctCa = (n) => (r.ca ? Math.round((n / r.ca) * 100) + " %" : "—");
+  const resultat = [
+    { label: "Chiffre d'affaires", value: r.ca, icon: TrendingUp, tint: 4, sous: `${r.nbCommandes} commande${r.nbCommandes > 1 ? "s" : ""}${r.livraison ? ` + ${fmt(r.livraison)} de livraison` : ""}` },
+    { label: "Coût des marchandises", value: r.coutMarch, icon: Package, tint: 7, sous: r.sansCout.length ? `${r.sansCout.length} vente(s) sans coût d'achat` : pctCa(r.coutMarch) + " du CA" },
+    { label: "Dépenses", value: r.totalDepenses, icon: Wallet, tint: 3, sous: `${r.depenses.length} dépense${r.depenses.length > 1 ? "s" : ""}`, aller: () => go("depenses") },
+    { label: "Bénéfice net", value: r.benef, icon: Landmark, tint: r.benef >= 0 ? 0 : 3, color: r.benef >= 0 ? "var(--success-dot)" : "var(--critical-solid)", sous: "CA + livraison − coûts − dépenses" },
   ];
+  const tresorerie = [
+    { label: "Encaissé", value: r.encaisseTotal, icon: Banknote, tint: 0, sous: "Argent reçu, livraison comprise" },
+    { label: "À encaisser", value: r.aEncaisserTotal, icon: Clock, tint: 1, sous: r.aVerifier ? `dont ${fmt(r.aVerifier)} de transferts à vérifier` : "Livraison comprise", aller: () => go("ventes", null, { paiement: "en_attente" }) },
+    { label: "Marge brute", value: r.margeBrute, icon: Sparkles, tint: 5, sous: pctCa(r.margeBrute) + " du CA" },
+    { label: "Capital investi", value: invest, icon: Store, tint: 2, sous: recupere == null ? "Aucun investissement noté" : `${Math.round(recupere)} % déjà récupéré` },
+  ];
+  const Kpi = ({ k }) => {
+    const contenu = <><div className="kpi-label"><span className={cx("kpi-dot", `tint-${k.tint}`)}><k.icon size={13} /></span>{k.label}</div>
+      <div className="kpi-value" style={{ color: k.color }}><CountUp value={k.value} format={fmt} /></div>
+      <div className="kpi-foot"><span className="subtle">{k.sous}</span>{k.aller && <ChevronRight size={14} className="subtle" />}</div></>;
+    return k.aller ? <button type="button" className="card kpi interactive kpi-bouton" onClick={k.aller}>{contenu}</button> : <div className="card kpi">{contenu}</div>;
+  };
 
   return (
     <>
-      <PageHeader title="Finances" meta="Capital engagé, rentabilité et dépenses"
-        actions={<Btn variant="primary" icon={Plus} onClick={() => go("finances", "nouveau")}>Enregistrer une dépense</Btn>} />
-      <div className="kpi-grid stagger">
-        {kpis.map((k, i) => (
-          <div className="card kpi" key={k.label} style={{ "--i": i }}>
-            <div className="kpi-label"><span className={cx("kpi-dot", `tint-${k.tint}`)}><k.icon size={13} /></span>{k.label}</div>
-            <div className="kpi-value" style={{ color: k.color }}><CountUp value={k.value} format={k.f} /></div>
-          </div>
-        ))}
-      </div>
-      {coutMarchandises > 0 && (
-        <div className="banner banner-info" style={{ marginBottom: 16 }}>
-          <Info size={16} />
-          <div>Marge brute sur ventes : <b className="num">{fmt(margeBrute)}</b> ({ca ? ((margeBrute / ca) * 100).toFixed(0) : 0} % du CA), calculée à partir du coût par article de vos produits.</div>
-        </div>
+      <PageHeader title="Finances" meta={<>Résultat, trésorerie et rentabilité <b>{bornes.titre}</b></>}
+        actions={<>
+          <Select value={periode} onChange={(e) => setPeriode(e.target.value)} style={{ width: 170 }} aria-label="Période">
+            <option value="mois">Ce mois-ci</option><option value="mois_prec">Mois dernier</option><option value="90">90 derniers jours</option><option value="365">12 derniers mois</option><option value="tout">Depuis le début</option>
+          </Select>
+          <Btn icon={Download} onClick={exporter} disabled={!r.vs.length && !r.depenses.length}>Exporter</Btn>
+        </>} />
+
+      <div className="titre-section">Résultat</div>
+      <div className="kpi-grid">{resultat.map((k) => <Kpi key={k.label} k={k} />)}</div>
+      {r.sansCout.length > 0 && (
+        <div className="banner banner-warning" style={{ margin: "12px 0 0" }}><AlertTriangle size={16} />
+          <div>{r.sansCout.length} vente{r.sansCout.length > 1 ? "s" : ""} concerne{r.sansCout.length > 1 ? "nt" : ""} des produits sans coût d'achat : le bénéfice est surestimé. Indiquez le coût dans la fiche des produits.</div></div>
       )}
-      <div className="grid-main">
-        <Card title="Ventes vs dépenses" sub="6 derniers mois">
+
+      <div className="titre-section">Trésorerie</div>
+      <div className="kpi-grid">{tresorerie.map((k) => <Kpi key={k.label} k={k} />)}</div>
+      {r.livraison > 0 && <p className="subtle" style={{ margin: "10px 2px 0" }}>Frais de livraison facturés aux clients : <b className="num">{fmt(r.livraison)}</b> : à part du chiffre d'affaires produits, mais comptés dans le bénéfice et la trésorerie.</p>}
+
+      <div className="grid-main" style={{ marginTop: 16 }}>
+        <Card title="Chiffre d'affaires et charges" sub="6 derniers mois · charges = coût des marchandises + dépenses">
           <div className="legend" style={{ marginBottom: 12, marginLeft: 0 }}>
-            <span><i style={{ background: "var(--c-blue)", height: 10, width: 10 }} />Chiffre d'affaires</span>
-            <span><i style={{ background: "var(--c-coral)", height: 10, width: 10 }} />Dépenses</span>
+            <span><i style={{ background: "var(--c-gold)", height: 10, width: 10 }} />Chiffre d'affaires</span>
+            <span><i style={{ background: "var(--c-coral)", height: 10, width: 10 }} />Charges</span>
           </div>
-          <GroupedBars groups={months} series={[{ label: "CA", color: "var(--c-blue)" }, { label: "Dépenses", color: "var(--c-coral)" }]} />
+          <GroupedBars groups={months} series={[{ label: "Chiffre d'affaires", color: "var(--c-gold)" }, { label: "Charges", color: "var(--c-coral)" }]} />
+          <div className="row" style={{ flexWrap: "wrap", gap: 8, marginTop: 12 }}>
+            {months.map((m) => <span key={m.full} className="badge" title={m.full}>{m.label} : <b className="num" style={{ color: m.benef >= 0 ? "var(--success)" : "var(--critical)" }}>{m.benef >= 0 ? "+" : "−"}{fmtShort(Math.abs(m.benef))}</b></span>)}
+          </div>
         </Card>
-        <Card title="Répartition des dépenses">
-          {byCat.length ? <Donut items={byCat} format={fmtShort} centerLabel="Investi" /> : <EmptyState icon={Wallet} title="Aucune dépense" />}
+        <Card title="Encaissements par moyen" sub="Argent reçu sur la période">
+          {r.parMoyen.length ? <Donut items={r.parMoyen} format={fmtShort} centerLabel="Encaissé" /> : <EmptyState icon={Banknote} title="Aucun encaissement" />}
         </Card>
       </div>
-      <Card title="Historique des dépenses" padded={false}
-        actions={<Select value={cat} onChange={(e) => setCat(e.target.value)} style={{ width: 170 }} aria-label="Catégorie"><option value="">Toutes catégories</option>{CATEGORIES.map((c) => <option key={c.key}>{c.key}</option>)}</Select>}>
+
+      <div className="grid-2" style={{ marginTop: 16 }}>
+        <Card title="Par vendeur" sub="Ventes, argent encaissé et reste à encaisser" padded={false}>
+          {r.parVendeur.length === 0 ? <EmptyState icon={Users} title="Aucune vente" /> : (
+            <div className="table-scroll"><table className="table">
+              <thead><tr><th>Vendeur</th><th className="right">Ventes</th><th className="right">Encaissé</th><th className="right">À encaisser</th></tr></thead>
+              <tbody>{r.parVendeur.map((v) => <tr key={v.nom}><td className="wrap"><div className="cell-main">{v.nom}</div><div className="cell-sub">{v.n} ligne{v.n > 1 ? "s" : ""}</div></td><td className="right num">{fmt(v.ventes)}</td><td className="right num" style={{ color: "var(--success)" }}>{fmt(v.encaisse)}</td><td className="right num strong" style={{ color: v.attente ? "var(--warning)" : undefined }}>{fmt(v.attente)}</td></tr>)}</tbody>
+            </table></div>
+          )}
+        </Card>
+        <Card title="Marge par produit" sub="Du plus rentable au moins rentable" padded={false}>
+          {r.parProduit.length === 0 ? <EmptyState icon={Tag} title="Aucune vente" /> : (
+            <div className="table-scroll"><table className="table">
+              <thead><tr><th>Produit</th><th className="right hide-sm">Vendus</th><th className="right">CA</th><th className="right">Marge</th></tr></thead>
+              <tbody>{r.parProduit.slice(0, 12).map((p) => { const m = p.ca - p.cout; return (
+                <tr key={p.pack.id}><td className="wrap"><div className="cell-main">{p.pack.nom}</div>{p.inconnu && <div className="cell-sub" style={{ color: "var(--warning)" }}>Coût d'achat à renseigner</div>}</td>
+                  <td className="right num hide-sm">{p.qte}</td><td className="right num">{fmt(p.ca)}</td>
+                  <td className="right num strong" style={{ color: p.inconnu ? undefined : m >= 0 ? "var(--success)" : "var(--critical)" }}>{p.inconnu ? "—" : <>{fmt(m)}<div className="cell-sub">{p.ca ? Math.round((m / p.ca) * 100) : 0} %</div></>}</td></tr>); })}</tbody>
+            </table></div>
+          )}
+        </Card>
+      </div>
+
+      <Card title="Investissements" sub="Capital engagé dans la boutique (stock de départ, matériel, travaux…), récupéré au fil des bénéfices" style={{ marginTop: 16 }} padded={false}
+        actions={<Btn variant="primary" icon={Plus} onClick={() => go("finances", "nouveau")}>Ajouter</Btn>}>
+        {invest > 0 && (
+          <div style={{ padding: "12px 16px 0" }}>
+            <div className="row-between"><span className="subtle">Récupéré par les bénéfices</span><b className="num">{fmt(Math.max(0, benefTotal))} / {fmt(invest)}</b></div>
+            <div className="progress" style={{ marginTop: 6 }}><span style={{ width: `${recupere || 0}%` }} /></div>
+          </div>
+        )}
         <div style={{ height: 12 }} />
-        {rows.length === 0 ? <EmptyState icon={Wallet} title="Aucune dépense" action={<Btn variant="primary" icon={Plus} onClick={() => go("finances", "nouveau")}>Enregistrer une dépense</Btn>} /> : (
+        {rows.length === 0 ? <EmptyState icon={Store} title="Aucun investissement noté" action={<Btn variant="primary" icon={Plus} onClick={() => go("finances", "nouveau")}>Ajouter un investissement</Btn>} /> : (
           <div className="table-scroll">
             <table className="table">
               <thead><tr><th>Libellé</th><th className="hide-sm">Catégorie</th><th className="hide-sm">Date</th><th className="right">Montant</th><th style={{ width: 80 }} /></tr></thead>
-              <tbody key={cat}>
-                {rows.map((i, k) => (
-                  <tr key={i.id} style={{ "--i": k }}>
+              <tbody>
+                {rows.map((i) => (
+                  <tr key={i.id}>
                     <td className="wrap"><div className="cell-main" style={{ fontWeight: 550 }}>{i.libelle}</div><div className="cell-sub only-mobile">{i.categorie} · {fmtDate(i.date)}</div></td>
                     <td className="hide-sm"><span className="row"><span style={{ width: 8, height: 8, borderRadius: 3, background: catColor(i.categorie) }} />{i.categorie}</span></td>
                     <td className="hide-sm muted">{fmtDate(i.date)}</td>
-                    <td className="right num strong" style={{ color: "var(--critical-solid)" }}>−{fmt(i.montant)}</td>
+                    <td className="right num strong">{fmt(i.montant)}</td>
                     <td className="right"><span className="row" style={{ gap: 2, justifyContent: "flex-end" }}>
                       <button className="icon-btn" onClick={() => setEditing(i)} aria-label="Modifier"><Pencil size={14} /></button>
                       <button className="icon-btn danger" onClick={() => remove(i)} aria-label="Supprimer"><Trash2 size={14} /></button>

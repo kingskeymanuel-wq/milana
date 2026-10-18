@@ -61,6 +61,20 @@ app.use(express.json({ limit: "15mb" })); // images produit (base64) et imports 
 
 // Limites anti-abus
 app.use("/api", rateLimit({ windowMs: 15 * 60 * 1000, max: 600, standardHeaders: true, legacyHeaders: false }));
+// Coûts d'achat : réservés à l'administrateur. Toute réponse destinée à un vendeur ou au public en est expurgée,
+// quelle que soit la route (lignes de vente, commandes, fiches clients…).
+function retirerCouts(o, n = 0) {
+  if (!o || typeof o !== "object" || n > 8) return o;
+  if (Array.isArray(o)) { for (const x of o) retirerCouts(x, n + 1); return o; }
+  if ("cout_unitaire" in o) delete o.cout_unitaire;
+  for (const k in o) if (o[k] && typeof o[k] === "object") retirerCouts(o[k], n + 1);
+  return o;
+}
+app.use("/api", (req, res, next) => {
+  const json = res.json.bind(res);
+  res.json = (corps) => json(req.user?.role === "admin" ? corps : retirerCouts(corps));
+  next();
+});
 // Plus strict sur la connexion et l'inscription (force brute sur les mots de passe)
 app.use(
   ["/api/auth/connexion", "/api/auth/inscription"],

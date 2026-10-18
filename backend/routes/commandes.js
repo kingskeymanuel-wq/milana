@@ -313,7 +313,7 @@ router.post("/:id/retour", (req, res) => {
     } else {
       db.prepare("UPDATE ventes SET quantite = quantite - ? WHERE id = ?").run(q, ligne.id);
       if (nouveau) { // … et l'article d'échange y entre, sur une nouvelle ligne
-        const copie = { ...ligne, id: nanoid(), pack_id: nouveau.id, quantite: q, prix_unitaire: prixNouveau, prix_catalogue: nouveau.prix };
+        const copie = { ...ligne, id: nanoid(), pack_id: nouveau.id, quantite: q, prix_unitaire: prixNouveau, prix_catalogue: nouveau.prix, cout_unitaire: nouveau.cout ?? null };
         const cols = Object.keys(copie);
         db.prepare(`INSERT INTO ventes (${cols.join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`).run(...cols.map((k) => copie[k]));
       }

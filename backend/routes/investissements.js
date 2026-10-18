@@ -24,7 +24,7 @@ router.post("/", (req, res) => {
   const id = idOuNouveau(req.body.id);
   if (lire(id)) return res.status(409).json({ erreur: "Identifiant déjà utilisé" });
   db.prepare("INSERT INTO investissements (id, libelle, categorie, montant, date_invest) VALUES (?, ?, ?, ?, ?)").run(
-    id, libelle, CATEGORIES.includes(categorie) ? categorie : "Autre", Number(montant), dateValide(date_invest)
+    id, libelle, CATEGORIES.includes(categorie) ? categorie : "Autre", Math.round(Number(montant)), dateValide(date_invest)
   );
   res.status(201).json(lire(id));
 });
@@ -37,7 +37,7 @@ router.put("/:id", (req, res) => {
   for (const k of ["libelle", "categorie", "montant", "date_invest"]) if (req.body[k] !== undefined) c[k] = req.body[k];
   if (!c.libelle || !(Number(c.montant) > 0)) return res.status(400).json({ erreur: "libelle et montant (> 0) sont requis" });
   db.prepare("UPDATE investissements SET libelle=?, categorie=?, montant=?, date_invest=? WHERE id=?").run(
-    c.libelle, CATEGORIES.includes(c.categorie) ? c.categorie : "Autre", Number(c.montant), dateValide(String(c.date_invest).slice(0, 10)), i.id
+    c.libelle, CATEGORIES.includes(c.categorie) ? c.categorie : "Autre", Math.round(Number(c.montant)), dateValide(String(c.date_invest).slice(0, 10)), i.id
   );
   res.json(lire(i.id));
 });

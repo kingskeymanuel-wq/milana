@@ -61,6 +61,12 @@ function ouvrirEspace(fichier) {
   ajouterColonne("commandes", "frais_livraison", "REAL NOT NULL DEFAULT 0");
   ajouterColonne("commandes", "contact_telephone", "TEXT");
   ajouterColonne("commandes", "contact_email", "TEXT");
+  // Coût d'achat de la ligne, figé à la vente (la marge des ventes passées ne bouge plus si le coût du produit change)
+  if (ajouterColonne("ventes", "cout_unitaire", "REAL")) db.exec("UPDATE ventes SET cout_unitaire = (SELECT p.cout FROM packs p WHERE p.id = ventes.pack_id)");
+  db.exec(`CREATE TRIGGER IF NOT EXISTS ventes_cout_insert AFTER INSERT ON ventes WHEN NEW.cout_unitaire IS NULL
+    BEGIN UPDATE ventes SET cout_unitaire = (SELECT cout FROM packs WHERE id = NEW.pack_id) WHERE id = NEW.id; END;
+  CREATE TRIGGER IF NOT EXISTS ventes_cout_echange AFTER UPDATE OF pack_id ON ventes WHEN NEW.pack_id <> OLD.pack_id
+    BEGIN UPDATE ventes SET cout_unitaire = (SELECT cout FROM packs WHERE id = NEW.pack_id) WHERE id = NEW.id; END;`);
   ajouterColonne("utilisateurs", "paiements", "TEXT"); // moyens de paiement personnels du vendeur (JSON)
   ajouterColonne("clients", "vendeur_id", "TEXT"); // vendeur qui a apporté le client (null : client de la boutique)
   db.exec("UPDATE ventes SET commande_id = (SELECT c.id FROM commandes c WHERE c.vente_id = ventes.id) WHERE commande_id IS NULL");
