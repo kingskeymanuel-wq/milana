@@ -1208,6 +1208,7 @@ const NAV = [
   { key: "marketing", label: "Marketing", icon: Megaphone, admin: true },
   { key: "finances", label: "Finances", icon: Landmark, admin: true },
   { key: "caisse", label: "Caisse", icon: Banknote, admin: true, serveur: true },
+  { key: "mobile-money", label: "Mobile Money", icon: Smartphone, admin: true, serveur: true },
 ];
 /* Pages visibles selon le rôle : le vendeur vend, remet les tickets et suit les livraisons (ni produits, ni prix,
    ni stocks, ni dépenses, ni marketing, ni finances) */
@@ -5332,6 +5333,105 @@ function CarteARemettre() {
   );
 }
 
+/* =====================================================================
+   PAGE : Contrôle Mobile Money (administrateur) — relevés Orange, MTN, Moov, Wave
+   rapprochés des paiements déclarés dans les commandes
+   ===================================================================== */
+const STATUTS_RAPPRO = {
+  ecart: { label: "Écart de montant", tone: "critical" }, doublon: { label: "ID utilisé deux fois", tone: "critical" },
+  introuvable: { label: "Introuvable au relevé", tone: "critical" }, sans_reference: { label: "Sans ID de transaction", tone: "warning" },
+  non_couvert: { label: "Relevé à importer", tone: "neutral" }, rapproche: { label: "Rapproché", tone: "success" },
+};
+function PageRapprochement() {
+  const { toast, confirm, go, mode, rafraichir } = useApp();
+  const [r, setR] = useState(null);
+  const [operateur, setOperateur] = useState("Orange Money");
+  const [texte, setTexte] = useState("");
+  const [filtre, setFiltre] = useState("a_traiter");
+  const [busy, setBusy] = useState(false);
+  const charger = useCallback(() => apiFetch("GET", "/api/rapprochement").then(setR).catch((e) => toast({ title: "Contrôle indisponible", desc: e.message, tone: "critical" })), []);
+  useEffect(() => { charger(); }, [charger]);
+  if (mode !== "api") return <><PageHeader title="Mobile Money" /><Card><EmptyState icon={Smartphone} title="Disponible avec le serveur" /></Card></>;
+  if (!r) return <SkeletonPage />;
+  const lireFichier = (e) => { const f = e.target.files?.[0]; if (!f) return; if (f.size > 8e6) return toast({ title: "Fichier trop lourd (8 Mo maximum)", tone: "critical" }); const fr = new FileReader(); fr.onload = () => setTexte(String(fr.result || "")); fr.readAsText(f, "utf-8"); e.target.value = ""; };
+  const importer = async () => {
+    setBusy(true);
+    try { const x = await apiFetch("POST", "/api/rapprochement/import", { operateur, texte }); toast({ title: "Relevé importé", desc: `${x.ajoutees} transaction(s) ajoutée(s)${x.deja ? `, ${x.deja} déjà connue(s)` : ""}` }); setTexte(""); await charger(); }
+    catch (e) { toast({ title: "Import impossible", desc: e.message, tone: "critical" }); }
+    finally { setBusy(false); }
+  };
+  const retirer = async (i) => { if (await confirm({ title: "Retirer ce relevé ?", message: `${i.operateur} · ${i.nb_ajoutees} transaction(s)`, confirmLabel: "Retirer", tone: "critical" })) { await apiFetch("DELETE", `/api/rapprochement/import/${i.id}`); charger(); } };
+  const confirmer = async (d) => {
+    try { await apiFetch("PATCH", `/api/commandes/${d.commande_id}/paiement`, { mode_paiement: d.operateur, reference_paiement: d.reference, telephone_paiement: d.telephone || d.releve?.telephone || "" }); toast({ title: "Paiement confirmé", desc: `Commande ${d.numero}` }); await charger(); if (rafraichir) rafraichir(); }
+    catch (e) { toast({ title: "Confirmation impossible", desc: e.message, tone: "critical" }); }
+  };
+  const aTraiter = (d) => d.statut !== "rapproche" && d.statut !== "non_couvert" || (d.a_verifier && d.statut === "rapproche");
+  const liste = r.declares.filter((d) => filtre === "tous" ? true : filtre === "a_traiter" ? aTraiter(d) : d.statut === filtre);
+  const nbATraiter = r.declares.filter(aTraiter).length;
+  return (
+    <>
+      <PageHeader title="Mobile Money" meta="Vos relevés Orange Money, MTN MoMo, Moov Money et Wave comparés aux paiements déclarés dans vos commandes" />
+      <div className="grid-main">
+        <Card title="Importer un relevé" sub="Exportez l'historique des transactions depuis le portail marchand de l'opérateur (fichier CSV), puis déposez-le ici">
+          <div className="stack">
+            <Field label="Opérateur"><div className="chips">{["Orange Money", "MTN MoMo", "Moov Money", "Wave"].map((o) => <button type="button" key={o} className={cx("chip", operateur === o && "on")} onClick={() => setOperateur(o)}>{o}</button>)}</div></Field>
+            <Field label="Fichier CSV" help="Ou collez le contenu ci-dessous. Les colonnes « ID de transaction » et « montant » sont reconnues automatiquement ; les transactions échouées sont ignorées.">
+              <input type="file" accept=".csv,.txt,text/csv,text/plain" onChange={lireFichier} />
+            </Field>
+            <textarea className="input" rows={5} value={texte} onChange={(e) => setTexte(e.target.value)} placeholder={"Date;ID de transaction;Montant;Expéditeur\n18/10/2026;MP241018.1234.A12345;10 000;0707070707"} style={{ width: "100%", fontFamily: "ui-monospace, monospace", fontSize: 12.5, padding: 10 }} />
+            <div className="row" style={{ justifyContent: "flex-end" }}><Btn variant="primary" icon={Upload} loading={busy} disabled={texte.trim().split("\n").length < 2} onClick={importer}>Importer le relevé {operateur}</Btn></div>
+          </div>
+        </Card>
+        <Card title="Par opérateur" sub="Déclaré dans les commandes · confirmé par le relevé · total reçu au relevé">
+          {r.par_operateur.length === 0 ? <EmptyState icon={Smartphone} title="Aucun paiement Mobile Money" /> : r.par_operateur.map((o) => (
+            <div key={o.operateur} style={{ padding: "10px 0", borderBottom: "1px solid var(--divider)" }}>
+              <div className="row-between"><span className="row strong" style={{ gap: 8 }}><ModePaiement mode={o.operateur} taille={20} />{o.operateur}</span>
+                <span className="subtle">{o.couverture ? `relevé du ${fmtDate(o.couverture.du)} au ${fmtDate(o.couverture.au)}` : "aucun relevé"}</span></div>
+              <div className="row-between" style={{ marginTop: 6 }}><span className="subtle">Déclaré <b className="num">{fmt(o.declare)}</b></span><span className="subtle">Confirmé <b className="num" style={{ color: "var(--success)" }}>{fmt(o.confirme)}</b></span><span className="subtle">Relevé <b className="num">{fmt(o.releve)}</b></span></div>
+            </div>))}
+        </Card>
+      </div>
+
+      <Card title="Paiements déclarés" sub={nbATraiter ? `${nbATraiter} à examiner` : "Tout est en ordre"} padded={false} style={{ marginTop: 16 }}
+        actions={<Select value={filtre} onChange={(e) => setFiltre(e.target.value)} style={{ width: 200 }} aria-label="Filtre">
+          <option value="a_traiter">À examiner ({nbATraiter})</option><option value="tous">Tous ({r.declares.length})</option>
+          {Object.entries(STATUTS_RAPPRO).map(([k, s]) => <option key={k} value={k}>{s.label} ({r.resume[k] || 0})</option>)}
+        </Select>}>
+        {liste.length === 0 ? <EmptyState icon={CheckCircle2} title="Rien à examiner" /> : (
+          <div className="table-scroll"><table className="table">
+            <thead><tr><th>Commande</th><th className="hide-sm">ID de transaction</th><th className="right">Déclaré</th><th className="right hide-sm">Relevé</th><th>Statut</th><th /></tr></thead>
+            <tbody>{liste.map((d) => (
+              <tr key={d.commande_id}>
+                <td className="wrap"><a href={`#/commandes/${d.commande_id}`} className="cell-main">{d.numero}</a><div className="cell-sub">{d.operateur} · {fmtDate(d.jour)}{d.annulee ? " · annulée" : ""}</div></td>
+                <td className="hide-sm num">{d.reference || "—"}{d.suggestion && <div className="cell-sub">Au relevé : {d.suggestion.reference} ?</div>}</td>
+                <td className="right num">{fmt(d.montant)}</td>
+                <td className="right num hide-sm" style={{ color: d.statut === "ecart" ? "var(--critical)" : undefined }}>{d.releve ? fmt(d.releve.montant) : "—"}</td>
+                <td><Badge tone={STATUTS_RAPPRO[d.statut].tone} dot>{STATUTS_RAPPRO[d.statut].label}</Badge>{d.a_verifier && <div className="cell-sub">Transfert à vérifier</div>}</td>
+                <td className="right">{d.a_verifier && d.statut === "rapproche" && <Btn size="sm" variant="primary" onClick={() => confirmer(d)}>Confirmer</Btn>}</td>
+              </tr>))}</tbody>
+          </table></div>
+        )}
+      </Card>
+
+      <div className="grid-2" style={{ marginTop: 16 }}>
+        <Card title="Reçu sans commande" sub="Argent arrivé sur vos comptes sans commande correspondante" padded={false}>
+          {r.sans_commande.length === 0 ? <EmptyState icon={CheckCircle2} title="Aucun" /> : (
+            <div className="list">{r.sans_commande.slice(0, 50).map((x) => (
+              <div key={x.id} className="list-item"><div className="grow"><div className="row-between"><span className="strong num">{x.reference}</span><b className="num">{fmt(x.montant)}</b></div><div className="subtle">{x.operateur}{x.jour ? " · " + fmtDate(x.jour) : ""}{x.telephone ? " · " + x.telephone : ""}</div></div></div>))}</div>
+          )}
+        </Card>
+        <Card title="Relevés importés" padded={false}>
+          {r.imports.length === 0 ? <EmptyState icon={Upload} title="Aucun relevé importé" /> : (
+            <div className="list">{r.imports.map((i) => (
+              <div key={i.id} className="list-item"><div className="grow"><div className="row-between"><span className="strong">{i.operateur}</span><button className="icon-btn danger" onClick={() => retirer(i)} aria-label="Retirer ce relevé"><Trash2 size={14} /></button></div>
+                <div className="subtle">{i.nb_ajoutees} transaction(s){i.du ? ` · du ${fmtDate(i.du)} au ${fmtDate(i.au)}` : ""} · importé le {fmtDate(String(i.importe_le).slice(0, 10))}{i.par ? " par " + i.par : ""}</div></div></div>))}</div>
+          )}
+        </Card>
+      </div>
+    </>
+  );
+}
+
 function PageFinances({ route }) {
   const { data, update, sync, go, toast, confirm } = useApp();
   const [periode, setPeriode] = useState("mois");
@@ -6278,6 +6378,7 @@ function App() {
     case "marketing": content = estAdmin ? <PageMarketing route={route} /> : <AccesReserve />; break;
     case "finances": content = estAdmin ? <PageFinances route={route} /> : <AccesReserve />; break;
     case "caisse": content = estAdmin ? <PageCaisse /> : <AccesReserve />; break;
+    case "mobile-money": content = estAdmin ? <PageRapprochement /> : <AccesReserve />; break;
     case "vendeurs": content = estAdmin ? <PageVendeurs /> : <AccesReserve />; break;
     case "tickets": content = <PageTickets route={route} />; break;
     case "livraisons": content = <PageLivraisons />; break;

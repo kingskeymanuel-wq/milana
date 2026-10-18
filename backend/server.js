@@ -110,6 +110,7 @@ app.use("/api/donnees", donneesRoutes);
 app.use("/api/parametres", parametresRoutes);
 app.use("/api/livreurs", livreursRoutes);
 app.use("/api/caisse", require("./routes/caisse"));
+app.use("/api/rapprochement", adminOnly, require("./routes/rapprochement")); // relevés Mobile Money : administrateur seulement
 app.use("/api/depenses", adminOnly, depensesRoutes); // les vendeurs ne gèrent pas l'argent de la boutique
 app.use("/api/diagnostics", adminOnly, require("./routes/diagnostics"));
 app.use("/api/formations", adminOnly, require("./routes/formations"));

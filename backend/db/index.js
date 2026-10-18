@@ -89,6 +89,11 @@ function ouvrirEspace(fichier) {
   CREATE TRIGGER IF NOT EXISTS ventes_montant_paye_insert AFTER INSERT ON ventes WHEN NEW.statut_paiement = 'payee' AND NEW.commande_id IS NOT NULL
     BEGIN UPDATE commandes SET montant_paye = ROUND((SELECT SUM(quantite * prix_unitaire) FROM ventes WHERE commande_id = commandes.id) + COALESCE(frais_livraison, 0))
       WHERE id = NEW.commande_id AND montant_paye IS NULL AND statut <> 'annulee' AND NOT EXISTS (SELECT 1 FROM ventes WHERE commande_id = NEW.commande_id AND statut_paiement <> 'payee'); END;
+  CREATE TABLE IF NOT EXISTS releves_mm_imports (
+    id TEXT PRIMARY KEY, operateur TEXT NOT NULL, nb_lignes INTEGER NOT NULL, nb_ajoutees INTEGER NOT NULL, du TEXT, au TEXT, importe_par TEXT, importe_le TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS releves_mm (
+    id TEXT PRIMARY KEY, import_id TEXT NOT NULL, operateur TEXT NOT NULL, reference TEXT NOT NULL, montant INTEGER NOT NULL,
+    telephone TEXT, jour TEXT, sens TEXT NOT NULL DEFAULT 'entree', importe_le TEXT NOT NULL, UNIQUE (operateur, reference));
   CREATE TABLE IF NOT EXISTS reglements_retour (
     id TEXT PRIMARY KEY, commande_id TEXT NOT NULL, sens TEXT NOT NULL, montant INTEGER NOT NULL, motif TEXT,
     statut TEXT NOT NULL DEFAULT 'a_regler', moyen TEXT, note TEXT, cree_le TEXT NOT NULL, cree_par TEXT, regle_le TEXT, regle_par TEXT);`);
