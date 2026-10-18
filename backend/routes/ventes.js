@@ -40,7 +40,7 @@ router.get("/", (req, res) => {
 // GET /api/ventes/:id
 router.get("/:id", (req, res) => {
   const vente = db.prepare("SELECT * FROM ventes WHERE id = ?").get(req.params.id);
-  if (!vente) return res.status(404).json({ erreur: "Vente introuvable" });
+  if (!vente || !aMoi(vente, req)) return res.status(404).json({ erreur: "Vente introuvable" });
   res.json(enrichir(vente));
 });
 
@@ -118,7 +118,7 @@ router.post("/", (req, res) => {
 // la commande était déjà annulée. Une commande sans ligne restante est supprimée.
 router.delete("/:id", adminOnly, (req, res) => {
   const vente = db.prepare("SELECT * FROM ventes WHERE id = ?").get(req.params.id);
-  if (!vente) return res.status(404).json({ erreur: "Vente introuvable" });
+  if (!vente || !aMoi(vente, req)) return res.status(404).json({ erreur: "Vente introuvable" });
   const cmd = db.prepare("SELECT * FROM commandes WHERE id = ? OR vente_id = ?").get(vente.commande_id, vente.id);
   db.transaction(() => {
     if (cmd?.statut !== "annulee") mouvementLots(vente.pack_id, vente.quantite, "suppression", { reference: cmd?.numero, auteurId: req.user?.id });
