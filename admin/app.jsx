@@ -390,6 +390,7 @@ function depuisServeur(p) {
     investissements: p.investissements.map((i) => ({ id: i.id, libelle: i.libelle, categorie: i.categorie, montant: i.montant, date: String(i.date_invest).slice(0, 10) })),
     depenses: (p.depenses || []).map((x) => ({ id: x.id, libelle: x.libelle, categorie: x.categorie, montant: x.montant, date: String(x.date_depense).slice(0, 10), note: x.note || "", auteurId: x.auteur_id, auteur: x.auteur || "", creeLe: x.cree_le })),
     boutique: { ...boutiqueParDefaut(), ...(p.boutique || {}) },
+    mesPaiements: p.mes_paiements || {},
   };
 }
 
@@ -1196,7 +1197,7 @@ const NAV = [
   { key: "livraisons", label: "Livraisons", icon: Truck, badge: (d) => d.commandes.filter((c) => c.livraison && !["livree", "annulee"].includes(c.statut)).length },
   { key: "produits", label: "Produits", icon: Tag, admin: true },
   { key: "stocks", label: "Stocks", icon: Boxes, admin: true, badge: (d) => d.packs.filter((p) => p.actif !== false && p.stock <= seuilDe(p)).length },
-  { key: "clients", label: "Clients", icon: Users, admin: true },
+  { key: "clients", label: "Clients", icon: Users },
   { key: "diagnostics", label: "Diagnostics", icon: Sparkles, admin: true },
   { key: "formations", label: "Formations", icon: FileText, admin: true },
   { key: "depenses", label: "Dépenses", icon: Wallet, admin: true },
@@ -1464,8 +1465,8 @@ const LIENS_PAIEMENT = { "Wave": "lien_wave", "Orange Money": "lien_orange", "MT
 function PaiementForm({ total, value, onChange, telClient, erreur, sansLivraison }) {
   const { data } = useApp();
   const p = infoPaiement(value.mode);
-  // Lien de paiement réglé par l'administrateur pour cet opérateur (Paramètres › Moyens de paiement)
-  const lienPaiement = p.type === "mobile" ? String(data.boutique?.[LIENS_PAIEMENT[p.key]] || "").trim() : "";
+  // Lien de paiement : celui du vendeur s'il en a réglé un (Paramètres › Mes moyens de paiement), sinon celui de la boutique
+  const lienPaiement = p.type === "mobile" ? String(data.mesPaiements?.[LIENS_PAIEMENT[p.key]] || data.boutique?.[LIENS_PAIEMENT[p.key]] || "").trim() : "";
   const modes = PAIEMENTS.filter((m) => m.type !== "en_ligne" && !(sansLivraison && m.type === "livraison"));
   const recu = value.recu === "" ? null : Number(value.recu);
   const set = (k, v) => onChange({ ...value, [k]: v });
@@ -2335,7 +2336,23 @@ function PageAccueil() {
   const h = new Date().getHours();
   const hello = h < 5 ? "Bonsoir" : h < 12 ? "Bonjour" : h < 18 ? "Bon après-midi" : "Bonsoir";
 
-  const kpis = [
+  // Vendeur : ce qui l'aide à agir — ce qu'il a vendu, encaissé, ce qu'il lui reste à encaisser et à livrer
+  const perso = useMemo(() => {
+    if (estAdmin) return null;
+    const T0 = today();
+    const ventes = enrichVentes(data).filter((v) => isValid(v) && daysBetween(parseDate(v.date), T0) < period);
+    const encaisse = ventes.filter((v) => v.statutPaiement === "payee").reduce((s, v) => s + v.total, 0);
+    const aEncaisser = ventes.filter((v) => v.statutPaiement !== "payee").reduce((s, v) => s + v.total, 0);
+    const aLivrer = data.commandes.filter((c) => c.livraison && !["livree", "annulee"].includes(c.statut)).length;
+    return { encaisse, aEncaisser, aLivrer };
+  }, [data, period, estAdmin]);
+
+  const kpis = !estAdmin ? [
+    { label: "Mes ventes", value: m.ca, format: fmt, delta: m.dCa, spark: m.series.map((s) => s.value), color: "var(--c-gold)", icon: TrendingUp, tint: 1 },
+    { label: "Encaissé", value: perso.encaisse, format: fmt, color: "var(--c-green)", icon: Banknote, tint: 0 },
+    { label: "À encaisser", value: perso.aEncaisser, format: fmt, color: "var(--c-coral)", icon: Clock, tint: 3, aller: () => go("ventes", null, { paiement: "en_attente" }) },
+    { label: "Commandes à livrer", value: perso.aLivrer, format: fmtNum, color: "var(--c-blue)", icon: Truck, tint: 4, aller: () => go("livraisons") },
+  ] : [
     { label: "Chiffre d'affaires", value: m.ca, format: fmt, delta: m.dCa, spark: m.series.map((s) => s.value), color: "var(--c-blue)", icon: TrendingUp, tint: 4 },
     { label: "Commandes", value: m.nb, format: fmtNum, delta: m.dNb, spark: m.series.map((s) => s.n), color: "var(--c-green)", icon: ShoppingCart, tint: 0 },
     { label: "Panier moyen", value: m.panier, format: fmt, delta: m.dPanier, spark: m.series.map((s) => (s.n ? s.value / s.n : 0)), color: "var(--c-purple)", icon: ShoppingBag, tint: 5 },
@@ -2348,8 +2365,8 @@ function PageAccueil() {
     todo.aEncaisser.length && { icon: Banknote, tint: 1, title: `${todo.aEncaisser.length} paiement${todo.aEncaisser.length > 1 ? "s" : ""} à encaisser`, sub: `${fmt(todo.aEncaisser.reduce((x, v) => x + v.total, 0))} payables à la livraison`, go: () => go("ventes", null, { paiement: "en_attente" }) },
     todo.aExpedier && { icon: Truck, tint: 2, title: `${todo.aExpedier} commande${todo.aExpedier > 1 ? "s" : ""} à expédier`, sub: "Prêtes pour la livraison", go: () => go("commandes", null, { statut: "confirmee" }) },
     todo.enLivraison && { icon: PackageCheck, tint: 5, title: `${todo.enLivraison} en cours de livraison`, sub: "Marquez-les livrées à réception", go: () => go("commandes", null, { statut: "expediee" }) },
-    todo.rupture.length && { icon: AlertTriangle, tint: 3, title: `${todo.rupture.length} produit${todo.rupture.length > 1 ? "s" : ""} en rupture`, sub: todo.rupture.map((p) => p.nom).join(", "), go: () => go("produits", null, { filtre: "rupture" }) },
-    todo.faible.length && { icon: Package, tint: 7, title: `${todo.faible.length} produit${todo.faible.length > 1 ? "s" : ""} en stock faible`, sub: todo.faible.map((p) => p.nom).join(", "), go: () => go("produits", null, { filtre: "faible" }) },
+    estAdmin && todo.rupture.length && { icon: AlertTriangle, tint: 3, title: `${todo.rupture.length} produit${todo.rupture.length > 1 ? "s" : ""} en rupture`, sub: todo.rupture.map((p) => p.nom).join(", "), go: () => go("produits", null, { filtre: "rupture" }) },
+    estAdmin && todo.faible.length && { icon: Package, tint: 7, title: `${todo.faible.length} produit${todo.faible.length > 1 ? "s" : ""} en stock faible`, sub: todo.faible.map((p) => p.nom).join(", "), go: () => go("produits", null, { filtre: "faible" }) },
   ].filter(Boolean);
 
   const topMax = Math.max(1, ...m.top.map((t) => t.total));
@@ -2388,14 +2405,19 @@ function PageAccueil() {
       )}
 
       <div className="kpi-grid stagger">
-        {kpis.map((k, i) => (
-          <div className="card kpi" key={k.label} style={{ "--i": i }}>
+        {kpis.map((k, i) => {
+          const contenu = <>
             <div className="kpi-label"><span className={cx("kpi-dot", `tint-${k.tint}`)}><k.icon size={13} /></span>{k.label}</div>
             <div className="kpi-value"><CountUp value={k.value} format={k.format} /></div>
-            <div className="kpi-foot"><Delta value={k.delta} /><span className="hide-sm">vs période préc.</span></div>
-            <div className="kpi-spark" key={period}><Sparkline values={k.spark} color={k.color} /></div>
-          </div>
-        ))}
+            {k.delta !== undefined
+              ? <div className="kpi-foot"><Delta value={k.delta} /><span className="hide-sm">vs période préc.</span></div>
+              : <div className="kpi-foot"><span className="subtle">{k.aller ? "Voir le détail" : `${period} derniers jours`}</span>{k.aller && <ChevronRight size={14} className="subtle" />}</div>}
+            {k.spark && <div className="kpi-spark" key={period}><Sparkline values={k.spark} color={k.color} /></div>}
+          </>;
+          return k.aller
+            ? <button type="button" className="card kpi interactive kpi-bouton" key={k.label} style={{ "--i": i }} onClick={k.aller}>{contenu}</button>
+            : <div className="card kpi" key={k.label} style={{ "--i": i }}>{contenu}</div>;
+        })}
       </div>
 
       <div className="grid-main">
@@ -2426,11 +2448,11 @@ function PageAccueil() {
       </div>
 
       <div className="grid-3">
-        <Card title="Meilleurs produits" sub={`Par chiffre d'affaires · ${period} j`} actions={<Btn variant="plain" size="sm" onClick={() => go("produits")}>Tout voir</Btn>}>
+        <Card title={estAdmin ? "Meilleurs produits" : "Mes meilleurs produits"} sub={`Par chiffre d'affaires · ${period} j`} actions={estAdmin ? <Btn variant="plain" size="sm" onClick={() => go("produits")}>Tout voir</Btn> : null}>
           {m.top.length === 0 && <EmptyState icon={Tag} title="Pas encore de ventes" />}
           <div className="stack" style={{ gap: 14 }}>
             {m.top.map((t, i) => (
-              <div key={t.pack.id} className="row" style={{ gap: 12, cursor: "pointer" }} onClick={() => go("produits", t.pack.id)}>
+              <button type="button" key={t.pack.id} className="top-produit" style={{ gap: 12, cursor: estAdmin ? "pointer" : "default" }} disabled={!estAdmin} onClick={() => estAdmin && go("produits", t.pack.id)}>
                 <Thumb pack={t.pack} size="sm" />
                 <div className="grow">
                   <div className="row-between"><span className="strong truncate">{t.pack.nom}</span><span className="num strong">{fmtShort(t.total)}</span></div>
@@ -2439,7 +2461,7 @@ function PageAccueil() {
                     <span className="subtle num">{t.qte} u.</span>
                   </div>
                 </div>
-              </div>
+              </button>
             ))}
           </div>
         </Card>
@@ -5301,6 +5323,42 @@ function EquipeModal({ open, onClose }) {
   );
 }
 
+/* Mes moyens de paiement : numéros et liens personnels du vendeur (ou de l'administrateur) */
+function MesMoyensPaiement() {
+  const { data, toast, rafraichir } = useApp();
+  const OPS = [["Wave", "momo_wave", "lien_wave"], ["Orange Money", "momo_orange", "lien_orange"], ["MTN MoMo", "momo_mtn", "lien_mtn"], ["Moov Money", "momo_moov", "lien_moov"]];
+  const depuis = () => ({ momo_titulaire: "", ...Object.fromEntries(OPS.flatMap(([, n, l]) => [[n, ""], [l, ""]])), ...(data.mesPaiements || {}) });
+  const [v, setV] = useState(depuis);
+  const [mdp, setMdp] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { setV(depuis()); }, [JSON.stringify(data.mesPaiements)]);
+  const modifie = JSON.stringify(v) !== JSON.stringify(depuis());
+  const enregistrer = async () => {
+    setBusy(true);
+    try {
+      await apiFetch("PUT", "/api/parametres/mes-paiements", { ...v, mot_de_passe_actuel: mdp });
+      setMdp(""); toast({ title: "Moyens de paiement enregistrés", desc: "Ils sont proposés à vos clients à la caisse et sur votre lien de promotion." });
+      if (rafraichir) await rafraichir();
+    } catch (e) { toast({ title: "Enregistrement impossible", desc: e.message, tone: "critical" }); }
+    finally { setBusy(false); }
+  };
+  return (
+    <Card title="Mes moyens de paiement" sub="Vos propres numéros et liens de paiement : ils remplacent ceux de la boutique quand vous encaissez, et pour les commandes arrivées par votre lien." style={{ marginBottom: 16 }}>
+      <div className="stack">
+        {OPS.map(([nom, n, l]) => (
+          <div key={nom} className="form-grid">
+            <Field label={<span className="row" style={{ gap: 6 }}><ModePaiement mode={nom} taille={18} />Numéro {nom}</span>} optional><Input icon={Phone} inputMode="tel" value={v[n]} onChange={(e) => setV({ ...v, [n]: e.target.value })} placeholder="07 00 00 00 00" /></Field>
+            <Field label={`Lien de paiement ${nom}`} optional><Input icon={Link2} value={v[l]} onChange={(e) => setV({ ...v, [l]: e.target.value })} placeholder="https://…" /></Field>
+          </div>
+        ))}
+        <Field label="Nom affiché aux clients" optional help="Titulaire des comptes Mobile Money ci-dessus."><Input value={v.momo_titulaire} onChange={(e) => setV({ ...v, momo_titulaire: e.target.value })} /></Field>
+        {modifie && <Field label="Votre mot de passe" help="Demandé à chaque modification : l'argent de vos clients ira sur ces comptes."><Input icon={Lock} type="password" autoComplete="current-password" value={mdp} onChange={(e) => setMdp(e.target.value)} /></Field>}
+        <div className="row" style={{ justifyContent: "flex-end" }}><Btn variant="primary" loading={busy} disabled={!modifie || !mdp} onClick={enregistrer}>Enregistrer</Btn></div>
+      </div>
+    </Card>
+  );
+}
+
 function PageParametres() {
   const { settings, setSettings, data, update, sync, remplacerTout, toast, confirm, logout, auth, mode, go } = useApp();
   const enLigne = mode === "api";
@@ -5359,6 +5417,7 @@ function PageParametres() {
   return (
     <div className="page-narrow" style={{ margin: "0 auto" }}>
       <PageHeader title="Paramètres" />
+      {enLigne && !estAdmin && <MesMoyensPaiement />}
       {enLigne && estAdmin && (() => {
         const ops = [["Wave", "momo_wave", "lien_wave"], ["Orange Money", "momo_orange", "lien_orange"], ["MTN MoMo", "momo_mtn", "lien_mtn"], ["Moov Money", "momo_moov", "lien_moov"]];
         const b = data.boutique || {};
@@ -5866,7 +5925,7 @@ function App() {
     case "diagnostics": content = estAdmin ? <PageDiagnostics /> : <AccesReserve />; break;
     case "formations": content = estAdmin ? <PageFormations /> : <AccesReserve />; break;
     case "depenses": content = <PageDepenses />; break;
-    case "clients": content = !estAdmin ? <AccesReserve /> : isDetail ? <PageClient id={route.id} /> : <PageClients route={route} />; break;
+    case "clients": content = isDetail ? <PageClient id={route.id} /> : <PageClients route={route} />; break;
     case "ventes": content = <PageVentes />; break;
     case "stocks": content = estAdmin ? <PageStocks route={route} /> : <AccesReserve />; break;
     case "marketing": content = estAdmin ? <PageMarketing route={route} /> : <AccesReserve />; break;

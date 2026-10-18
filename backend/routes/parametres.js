@@ -50,6 +50,25 @@ function ecrireBoutique(valeurs) {
 
 router.get("/", (req, res) => res.json(lireBoutique()));
 
+/*
+ * Mes moyens de paiement (vendeur ou administrateur) : numéros et liens personnels.
+ * GET /api/parametres/mes-paiements — PUT { momo_*, lien_*, mot_de_passe_actuel }
+ */
+const moyens = require("../lib/moyensVendeur");
+router.get("/mes-paiements", (req, res) => res.json(moyens.lire(req.user.id)));
+router.put("/mes-paiements", (req, res) => {
+  const r = moyens.valider(req.body);
+  if (r.erreur) return res.status(400).json({ erreur: r.erreur });
+  // L'argent des clients ira sur ces numéros : le mot de passe est redemandé à chaque modification
+  const u = db.prepare("SELECT mot_de_passe FROM utilisateurs WHERE id = ?").get(req.user.id);
+  if (!req.body.mot_de_passe_actuel || !u || !bcrypt.compareSync(String(req.body.mot_de_passe_actuel), u.mot_de_passe)) {
+    return res.status(403).json({ erreur: "Confirmez avec votre mot de passe pour modifier vos moyens de paiement", confirmation_requise: true });
+  }
+  moyens.ecrire(req.user.id, r.valeurs, req.user.nom);
+  console.log(`Sécurité : moyens de paiement personnels modifiés par ${req.user.nom}`);
+  res.json(moyens.lire(req.user.id));
+});
+
 router.put("/", adminOnly, (req, res) => {
   if (req.body.nom !== undefined && !String(req.body.nom).trim()) return res.status(400).json({ erreur: "Le nom de la boutique est requis" });
   // Liens de paiement : adresses https uniquement (elles sont ouvertes par les clients)

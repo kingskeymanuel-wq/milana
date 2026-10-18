@@ -1,54 +1,57 @@
 /* =====================================================================
-   MILANA — système de design (inspiré de l'admin Shopify / Polaris)
+   MILANA — système de design : ivoire, encre brun-noir, or (refonte Claude + Codex)
    ===================================================================== */
 
-/* ---------- Jetons : thème clair ---------- */
+/* ---------- Jetons : thème clair — ivoire, encre brun-noir, or GOUABO ---------- */
 :root {
-  --bg: #f1f1f1;
-  --surface: #ffffff;
-  --surface-2: #f7f7f7;
-  --surface-3: #ebebeb;
-  --hover: #f4f4f4;
-  --pressed: #ebebeb;
-  --sidebar: #ebebeb;
-  --sidebar-hover: #e1e1e1;
-  --sidebar-active: #fafafa;
-  --border: #e3e3e3;
-  --border-strong: #cdcdcd;
-  --divider: #ebebeb;
+  --bg: #F5F1E9;
+  --surface: #FFFCF7;
+  --surface-2: #F8F3EA;
+  --surface-3: #EEE7DB;
+  --hover: #F2EBDD;
+  --pressed: #E9DFCF;
+  --sidebar: #EFE8DC;
+  --sidebar-hover: #E6DDCE;
+  --sidebar-active: #FFFCF7;
+  --border: #DDD3C4;
+  --border-strong: #B9AC99;
+  --divider: #E8E0D4;
 
-  --text: #303030;
-  --text-2: #616161;
-  --text-3: #8a8a8a;
+  --text: #241F19;       /* 15:1 sur la surface */
+  --text-2: #625B51;     /* 6,1:1 */
+  --text-3: #756D63;     /* 4,7:1 : lisible, même en petit */
 
-  --topbar: #1a1a1a;
-  --topbar-2: #2e2e2e;
-  --topbar-text: #e3e3e3;
+  --topbar: #211D18;
+  --topbar-2: #302A22;
+  --topbar-text: #FFF9F0;
 
-  --primary: #303030;
-  --primary-hover: #1a1a1a;
-  --primary-text: #ffffff;
-  --brand: #008060;
-  --brand-strong: #006e52;
-  --brand-soft: #e0f2ec;
-  --link: #005bd3;
-  --focus: #005bd3;
+  /* L'or est la signature ; les actions utilisent un brun-or foncé, lisible avec du texte blanc (7:1) */
+  --primary: #6B4B0B;
+  --primary-hover: #513806;
+  --primary-text: #FFFFFF;
+  --brand: #C9962F;
+  --brand-strong: #6B4B0B;
+  --brand-soft: #F7E8C1;
+  --brand-text: #241F19; /* texte posé sur l'or */
+  --link: #5E430C;
+  --focus: #9A7019;
 
-  --success: #0c5132;   --success-bg: #cdfee1;  --success-dot: #29845a;
-  --info: #00527c;      --info-bg: #e0f0ff;     --info-dot: #0094d5;
-  --warning: #5e4200;   --warning-bg: #ffeb78;  --warning-dot: #b28400;
-  --magic: #5700d1;     --magic-bg: #f1e6ff;    --magic-dot: #8051ff;
-  --critical: #8e0b21;  --critical-bg: #fedad9; --critical-dot: #e51c00;
-  --critical-solid: #c70a24;
-  --neutral: #616161;   --neutral-bg: #e3e3e3;  --neutral-dot: #8a8a8a;
+  --success: #1F5E3B;   --success-bg: #E1F2E7;  --success-dot: #26734A;
+  --info: #175A80;      --info-bg: #E1F1F8;     --info-dot: #287AA4;
+  --warning: #664600;   --warning-bg: #FBECC4;  --warning-dot: #A16C00;
+  --magic: #5B3E9E;     --magic-bg: #EEE7FA;    --magic-dot: #7056A4;
+  --critical: #8B2635;  --critical-bg: #F9E1E4; --critical-dot: #A52D3D;
+  --critical-solid: #A52D3D;
+  --neutral: #564F46;   --neutral-bg: #ECE6DC;  --neutral-dot: #8B8277;
 
-  --c-blue: #2c6ecb;
-  --c-green: #0f9d74;
-  --c-gold: #e0a12c;
-  --c-purple: #8b5cf6;
-  --c-gray: #a3a3a3;
-  --c-coral: #e8664f;
-  --chart-prev: #b8c4d6;
+  --c-blue: #287AA4;
+  --c-green: #26734A;
+  --c-gold: #B77A08;
+  --c-purple: #7056A4;
+  --c-gray: #8B8277;
+  --c-coral: #B94E3D;
+  --chart-prev: #968C80;
+
 
   --tint-0: #dff3e8; --tint-0-t: #0c5132;
   --tint-1: #fff1c7; --tint-1-t: #6b4b00;
@@ -59,67 +62,76 @@
   --tint-6: #ececec; --tint-6-t: #3d3d3d;
   --tint-7: #ffe8c9; --tint-7-t: #7a3f00;
 
-  --shadow-card: 0 0 0 1px rgba(26, 26, 26, .07), 0 1px 0 rgba(26, 26, 26, .05), 0 2px 4px -2px rgba(26, 26, 26, .06);
-  --shadow-hover: 0 0 0 1px rgba(26, 26, 26, .09), 0 6px 16px -6px rgba(26, 26, 26, .16);
-  --shadow-pop: 0 0 0 1px rgba(26, 26, 26, .08), 0 14px 32px -8px rgba(26, 26, 26, .22), 0 4px 8px -4px rgba(26, 26, 26, .1);
-  --shadow-modal: 0 0 0 1px rgba(26, 26, 26, .08), 0 32px 64px -16px rgba(26, 26, 26, .38);
-  --btn-primary-shadow: inset 0 -1px 0 1px rgba(0, 0, 0, .8), inset 0 0 0 1px #303030, inset 0 .5px 0 1.5px rgba(255, 255, 255, .25);
-  --btn-secondary-shadow: inset 0 -1px 0 0 #b5b5b5, inset 0 0 0 1px rgba(0, 0, 0, .1), inset 0 .5px 0 1.5px #fff;
+  --shadow-card: 0 0 0 1px rgba(36, 31, 25, .06), 0 1px 2px rgba(36, 31, 25, .05), 0 8px 24px -12px rgba(36, 31, 25, .10);
+  --shadow-hover: 0 0 0 1px rgba(36, 31, 25, .08), 0 10px 28px -10px rgba(36, 31, 25, .18);
+  --shadow-pop: 0 0 0 1px rgba(36, 31, 25, .08), 0 18px 42px -10px rgba(36, 31, 25, .24);
+  --shadow-modal: 0 0 0 1px rgba(36, 31, 25, .08), 0 28px 70px -14px rgba(20, 16, 11, .34);
+  --btn-primary-shadow: inset 0 -1px 0 1px rgba(0, 0, 0, .35), inset 0 .5px 0 1.5px rgba(255, 255, 255, .18);
+  --btn-secondary-shadow: inset 0 -1px 0 0 #B9AC99, inset 0 0 0 1px rgba(36, 31, 25, .10), inset 0 .5px 0 1.5px #FFFCF7;
 
-  --radius-xl: 16px;
-  --radius-lg: 12px;
-  --radius: 10px;
-  --radius-sm: 8px;
+  --radius-xl: 20px;
+  --radius-lg: 16px;
+  --radius: 12px;
+  --radius-sm: 10px;
 
-  --ease: cubic-bezier(.2, .8, .2, 1);
+  --ease: cubic-bezier(.2, .7, .2, 1);
   --ease-out: cubic-bezier(.16, 1, .3, 1);
-  --spring: cubic-bezier(.34, 1.56, .64, 1);
+  --spring: cubic-bezier(.34, 1.3, .64, 1);
 
-  --sidebar-w: 240px;
-  --topbar-h: 56px;
+  --sidebar-w: 248px;
+  --topbar-h: 58px;
 
   color-scheme: light;
 }
 
-/* ---------- Jetons : thème sombre ---------- */
+/* ---------- Jetons : thème sombre — brun-noir et or ---------- */
 :root[data-theme="dark"] {
-  --bg: #141414;
-  --surface: #232323;
-  --surface-2: #2a2a2a;
-  --surface-3: #333333;
-  --hover: #2c2c2c;
-  --pressed: #363636;
-  --sidebar: #1b1b1b;
-  --sidebar-hover: #262626;
-  --sidebar-active: #2e2e2e;
-  --border: #363636;
-  --border-strong: #4a4a4a;
-  --divider: #2f2f2f;
+  --bg: #16130F;
+  --surface: #211D18;
+  --surface-2: #2A251F;
+  --surface-3: #373027;
+  --hover: #312A22;
+  --pressed: #40372C;
+  --sidebar: #15120F;
+  --sidebar-hover: #28221B;
+  --sidebar-active: #383027;
+  --border: #4A4035;
+  --border-strong: #706353;
+  --divider: #383027;
 
-  --text: #ececec;
-  --text-2: #b3b3b3;
-  --text-3: #858585;
+  --text: #FFF9F0;
+  --text-2: #D6CDC1;
+  --text-3: #B9B0A5;
 
-  --topbar: #0c0c0c;
-  --topbar-2: #262626;
+  --topbar: #15120F;
+  --topbar-2: #28221B;
 
-  --primary: #f0f0f0;
-  --primary-hover: #ffffff;
-  --primary-text: #1a1a1a;
-  --brand: #2ec28f;
-  --brand-soft: rgba(46, 194, 143, .14);
-  --link: #6ea8ff;
-  --focus: #6ea8ff;
+  --primary: #E7BE67;
+  --primary-hover: #F2D386;
+  --primary-text: #241F19;
+  --brand: #E7BE67;
+  --brand-strong: #E7BE67;
+  --brand-soft: #4A3918;
+  --brand-text: #241F19;
+  --link: #F1C86E;
+  --focus: #F1C86E;
 
-  --success: #7fe0ae;   --success-bg: rgba(41, 132, 90, .28);
-  --info: #8cc8ff;      --info-bg: rgba(0, 148, 213, .22);
-  --warning: #ffd966;   --warning-bg: rgba(178, 132, 0, .28);
-  --magic: #c7adff;     --magic-bg: rgba(128, 81, 255, .24);
-  --critical: #ff9e9e;  --critical-bg: rgba(229, 28, 0, .22);
-  --critical-solid: #e5484d;
-  --neutral: #c4c4c4;   --neutral-bg: #3a3a3a;
+  --success: #9ED5AE;   --success-bg: #1E3C2B;  --success-dot: #9ED5AE;
+  --info: #A8D6ED;      --info-bg: #183A4D;     --info-dot: #A8D6ED;
+  --warning: #F4D485;   --warning-bg: #493710;  --warning-dot: #F4D485;
+  --magic: #CDBDF0;     --magic-bg: #31274A;    --magic-dot: #BDA9E8;
+  --critical: #F1B4BD;  --critical-bg: #4D2028; --critical-dot: #E78492;
+  --critical-solid: #E78492;
+  --neutral: #D2C8BC;   --neutral-bg: #393129;  --neutral-dot: #AAA095;
 
-  --chart-prev: #4d5870;
+  --c-blue: #79BDE0;
+  --c-green: #8CCD9E;
+  --c-gold: #E7BE67;
+  --c-purple: #BDA9E8;
+  --c-gray: #AAA095;
+  --c-coral: #F0A092;
+  --chart-prev: #83786B;
+
 
   --tint-0: rgba(41, 132, 90, .26);  --tint-0-t: #9fe8c0;
   --tint-1: rgba(224, 161, 44, .24); --tint-1-t: #ffd98a;
@@ -130,12 +142,12 @@
   --tint-6: rgba(255, 255, 255, .08); --tint-6-t: #d4d4d4;
   --tint-7: rgba(255, 145, 0, .22);  --tint-7-t: #ffc68a;
 
-  --shadow-card: 0 0 0 1px rgba(255, 255, 255, .06), 0 1px 2px rgba(0, 0, 0, .4);
-  --shadow-hover: 0 0 0 1px rgba(255, 255, 255, .1), 0 8px 20px -6px rgba(0, 0, 0, .6);
-  --shadow-pop: 0 0 0 1px rgba(255, 255, 255, .08), 0 16px 36px -8px rgba(0, 0, 0, .7);
-  --shadow-modal: 0 0 0 1px rgba(255, 255, 255, .08), 0 32px 64px -16px rgba(0, 0, 0, .8);
-  --btn-primary-shadow: inset 0 -1px 0 1px rgba(0, 0, 0, .25), inset 0 .5px 0 1px rgba(255, 255, 255, .6);
-  --btn-secondary-shadow: inset 0 0 0 1px #444, inset 0 1px 0 rgba(255, 255, 255, .06);
+  --shadow-card: 0 0 0 1px rgba(255, 249, 240, .06), 0 1px 2px rgba(0, 0, 0, .4);
+  --shadow-hover: 0 0 0 1px rgba(255, 249, 240, .1), 0 8px 20px -6px rgba(0, 0, 0, .6);
+  --shadow-pop: 0 0 0 1px rgba(255, 249, 240, .08), 0 16px 36px -8px rgba(0, 0, 0, .7);
+  --shadow-modal: 0 0 0 1px rgba(255, 249, 240, .08), 0 32px 64px -16px rgba(0, 0, 0, .8);
+  --btn-primary-shadow: inset 0 -1px 0 1px rgba(0, 0, 0, .25), inset 0 .5px 0 1px rgba(255, 255, 255, .45);
+  --btn-secondary-shadow: inset 0 0 0 1px #4A4035, inset 0 1px 0 rgba(255, 249, 240, .06);
 
   color-scheme: dark;
 }
@@ -225,9 +237,9 @@ kbd {
 .brand-mark {
   width: 30px; height: 30px; border-radius: 9px;
   display: grid; place-items: center;
-  background: linear-gradient(135deg, #36d399, #008060);
-  color: #fff;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .35), 0 2px 6px rgba(0, 128, 96, .45);
+  background: linear-gradient(135deg, #E7BE67, #B8862B);
+  color: #241F19;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .35), 0 2px 6px rgba(184, 134, 43, .45);
 }
 
 .topbar-search {
@@ -1053,7 +1065,7 @@ a.list-item { color: inherit; }
   animation: toastIn .38s var(--spring) both;
 }
 .toast.leaving { animation: toastOut .2s var(--ease) both; }
-.toast-icon { color: #36d399; flex-shrink: 0; }
+.toast-icon { color: #E7BE67; flex-shrink: 0; }
 .toast-critical .toast-icon { color: #ff6b6b; }
 .toast-info .toast-icon { color: #6ea8ff; }
 .toast-text { flex: 1; min-width: 0; font-size: 13px; }
@@ -1553,3 +1565,95 @@ div.prix-barre { margin-left: 0; }
 .lien-caisse .qr { flex: none; border-radius: 8px; }
 .lien-caisse .btn { align-self: flex-start; gap: 6px; }
 @media (max-width: 420px) { .lien-caisse { flex-direction: column; align-items: flex-start; } }
+.kpi-bouton { text-align: left; font: inherit; color: inherit; border: 0; cursor: pointer; width: 100%; }
+.kpi-bouton .kpi-foot { display: flex; align-items: center; justify-content: space-between; }
+.top-produit:disabled { opacity: 1; cursor: default; }
+.top-produit:disabled:hover { background: none; }
+
+
+/* =====================================================================
+   Refonte GOUABO (Claude + Codex) : lisibilité, cibles tactiles, sobriété
+   ===================================================================== */
+html, body { font-size: 14.5px; }
+.num, td.num, .kpi-value { font-variant-numeric: tabular-nums; }
+
+/* Boutons et icônes : faciles à toucher au téléphone */
+.btn { height: 40px; padding: 0 14px; font-size: 13.5px; border-radius: var(--radius-sm); }
+.btn-sm { height: 34px; padding: 0 11px; font-size: 13px; }
+.btn-lg { height: 48px; }
+.btn-icon { width: 40px; }
+.btn-sm.btn-icon { width: 34px; }
+.icon-btn { width: 36px; height: 36px; }
+@media (max-width: 640px) {
+  .btn { height: 44px; }
+  .btn-sm { height: 38px; }
+  .btn-icon { width: 44px; }
+  .icon-btn { width: 40px; height: 40px; }
+}
+.btn-primary { background: var(--primary); }
+.btn-primary:hover:not(:disabled) { background: var(--primary-hover); }
+.btn-brand { background: var(--brand); color: var(--brand-text); }
+
+/* Focus visible : anneau or, jamais seulement un changement de bordure */
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+/* Éléments posés sur l'or : texte foncé (contraste suffisant) */
+.step.done .step-dot, .pick-check, .sale-step-title .n.ok { color: var(--brand-text); }
+
+/* Bouton « Vente » de la barre du bas : le seul élément doré */
+@media (max-width: 1023px) {
+  .bn-fab { background: linear-gradient(135deg, #E7BE67, #B8862B); color: #241F19; box-shadow: 0 8px 20px -6px rgba(184, 134, 43, .65), inset 0 1px 0 rgba(255, 255, 255, .35); }
+}
+
+/* Barre latérale : entrée active marquée par un filet or */
+.nav-item.active { background: var(--sidebar-active); box-shadow: var(--shadow-card); }
+.nav-item.active::before { background: var(--brand); }
+
+/* Cartes : seules les cartes cliquables se soulèvent */
+.card { border-radius: var(--radius-lg); }
+.card.kpi:hover, .segment:hover { transform: none; box-shadow: var(--shadow-card); }
+.card.kpi.interactive:hover, .card.interactive:hover { transform: translateY(-2px); box-shadow: var(--shadow-hover); }
+.nav-item:hover { transform: none; }
+
+/* Animations sobres : un fondu court, sans flou ni rebond (plus rapide sur les petits téléphones) */
+@keyframes pageIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes carteEntre { from { opacity: 0; } to { opacity: 1; } }
+.page > .card, .page > .kpi-grid > .card, .page > .grid-main > .card, .layout-detail .card { animation: carteEntre .25s ease-out both; animation-delay: 0ms !important; }
+.btn { transition: background .15s, box-shadow .15s, border-color .15s, transform .1s; }
+.btn:active:not(:disabled) { transform: translateY(1px); }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}
+
+/* Tableau de bord : indicateurs lisibles */
+.kpi-value { font-size: 26px; font-weight: 700; letter-spacing: -.01em; }
+@media (min-width: 1024px) { .kpi-value { font-size: 28px; } }
+.top-produit { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; background: none; border: 0; padding: 6px; margin: -6px; border-radius: var(--radius-sm); color: inherit; font: inherit; cursor: pointer; }
+.top-produit:hover { background: var(--hover); }
+
+/* Fond de l'application : ivoire chaud, halos de lumière très doux (or en haut à droite, sauge en bas à gauche) */
+:root {
+  --fond-halo-1: rgba(226, 182, 87, .22);
+  --fond-halo-2: rgba(120, 160, 128, .14);
+  --fond-halo-3: rgba(255, 252, 245, .9);
+}
+:root[data-theme="dark"] {
+  --fond-halo-1: rgba(231, 190, 103, .12);
+  --fond-halo-2: rgba(110, 150, 120, .08);
+  --fond-halo-3: rgba(255, 249, 240, .03);
+}
+body::before {
+  content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background:
+    radial-gradient(60rem 40rem at 100% -10%, var(--fond-halo-1), transparent 60%),
+    radial-gradient(50rem 36rem at -10% 110%, var(--fond-halo-2), transparent 60%),
+    radial-gradient(40rem 30rem at 50% 40%, var(--fond-halo-3), transparent 70%),
+    var(--bg);
+}
+html { background: var(--bg); }
+body { background: transparent; }
+.app, .main { background: transparent; }
+/* Cartes légèrement translucides : le fond transparaît, sans gêner la lecture */
+.card { background: color-mix(in srgb, var(--surface) 94%, transparent); backdrop-filter: saturate(1.1); }
+.sidebar { background: color-mix(in srgb, var(--sidebar) 88%, transparent); backdrop-filter: blur(10px); }
+.auth, .verrou { background: transparent; }

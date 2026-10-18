@@ -1054,7 +1054,17 @@ function TiroirPanier() {
    Commande : coordonnées, livraison, paiement
    ===================================================================== */
 function PageCommander() {
-  const { lignes, configPanier: config, go, viderPanier, recharger, toast, synchroniserPanier } = useBoutique();
+  const { lignes, configPanier: configBoutique, go, viderPanier, recharger, toast, synchroniserPanier } = useBoutique();
+  // Client venu par le lien d'un vendeur qui a ses propres moyens de paiement : ce sont eux qui sont proposés
+  const refVendeur = configBoutique?.id ? lire(REF_KEY, {})[configBoutique.id] : null;
+  const [transfertVendeur, setTransfertVendeur] = useState(null);
+  useEffect(() => {
+    if (!refVendeur || !configBoutique?.id) return;
+    api("GET", `/api/boutique/paiements-vendeur?boutique=${encodeURIComponent(configBoutique.id)}&vendeur=${encodeURIComponent(refVendeur)}`)
+      .then((r) => { if (r.transfert?.length) { setTransfertVendeur(r.transfert); setOp((o) => (r.transfert.some((x) => x.mode === o) ? o : r.transfert[0].mode)); } })
+      .catch(() => {});
+  }, [configBoutique?.id, refVendeur]);
+  const config = transfertVendeur ? { ...configBoutique, paiements: { ...configBoutique.paiements, transfert: transfertVendeur } } : configBoutique;
   const memo = lire(CLIENT_KEY, {});
   const [c, setC] = useState({ nom: memo.nom || "", telephone: memo.telephone || "", email: memo.email || "", adresse: memo.adresse || "", ville: memo.ville || "", instructions: "" });
   const modes = [

@@ -61,6 +61,8 @@ function ouvrirEspace(fichier) {
   ajouterColonne("commandes", "frais_livraison", "REAL NOT NULL DEFAULT 0");
   ajouterColonne("commandes", "contact_telephone", "TEXT");
   ajouterColonne("commandes", "contact_email", "TEXT");
+  ajouterColonne("utilisateurs", "paiements", "TEXT"); // moyens de paiement personnels du vendeur (JSON)
+  ajouterColonne("clients", "vendeur_id", "TEXT"); // vendeur qui a apporté le client (null : client de la boutique)
   db.exec("UPDATE ventes SET commande_id = (SELECT c.id FROM commandes c WHERE c.vente_id = ventes.id) WHERE commande_id IS NULL");
   db.exec("CREATE INDEX IF NOT EXISTS idx_ventes_commande ON ventes(commande_id)");
 

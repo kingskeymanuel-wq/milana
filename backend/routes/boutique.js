@@ -79,6 +79,17 @@ function configPublique() {
     },
   };
 }
+/* Commande arrivée par le lien d'un vendeur qui a réglé ses propres moyens de paiement : ce sont les siens */
+const moyensVendeur = require("../lib/moyensVendeur");
+function transfertPour(cfg, vendeurId) {
+  const perso = vendeurId ? moyensVendeur.transfert(vendeurId) : [];
+  return perso.length ? perso : cfg.paiements.transfert;
+}
+// GET /api/boutique/paiements-vendeur?boutique=&vendeur= — moyens proposés au client venu par ce lien
+router.get("/paiements-vendeur", espacePublic, (req, res) => {
+  const v = req.query.vendeur ? db.prepare("SELECT id FROM utilisateurs WHERE id = ? AND actif = 1").get(String(req.query.vendeur)) : null;
+  res.json({ transfert: v ? moyensVendeur.transfert(v.id) : [] });
+});
 const fraisPour = (st, cfg) => (cfg.livraison.gratuite_des > 0 && st >= cfg.livraison.gratuite_des ? 0 : cfg.livraison.frais);
 
 function produitsPublics() {
@@ -136,7 +147,7 @@ function validerClient(c = {}, exigerEmail) {
   return { client };
 }
 
-function trouverOuCreerClient(c) {
+function trouverOuCreerClient(c, vendeurId = null) {
   const tel = normTel(c.telephone).replace(/\D/g, "");
   const existant = db.prepare("SELECT * FROM clients WHERE supprime = 0").all().find((x) => normTel(x.telephone).replace(/\D/g, "") === tel);
   if (existant) {
@@ -148,8 +159,9 @@ function trouverOuCreerClient(c) {
     return existant.id;
   }
   const id = nanoid();
-  db.prepare("INSERT INTO clients (id, nom, telephone, email, ville, statut, notes, consentement_marketing, cree_le) VALUES (?, ?, ?, ?, ?, 'Standard', ?, ?, ?)")
-    .run(id, c.nom, c.telephone, c.email || null, c.ville || null, "Client inscrit via la boutique en ligne", c.consentement ? 1 : 0, new Date().toISOString());
+  // Arrivé par le lien de promotion d'un vendeur : c'est son client
+  db.prepare("INSERT INTO clients (id, nom, telephone, email, ville, statut, notes, consentement_marketing, vendeur_id, cree_le) VALUES (?, ?, ?, ?, ?, 'Standard', ?, ?, ?, ?)")
+    .run(id, c.nom, c.telephone, c.email || null, c.ville || null, "Client inscrit via la boutique en ligne", c.consentement ? 1 : 0, vendeurId || null, new Date().toISOString());
   return id;
 }
 
@@ -273,7 +285,7 @@ router.post("/commandes", limiteCommandes, espacePublic, async (req, res) => {
   if (modePaiement === "livraison") {
     champsPaiement = { mode: "Paiement à la livraison", statut: "en_attente" };
   } else if (modePaiement === "transfert") {
-    const op = cfg.paiements.transfert.find((o) => o.mode === paiement.operateur);
+    const op = transfertPour(cfg, vendeurId).find((o) => o.mode === paiement.operateur);
     if (!op) return res.status(400).json({ erreur: "Opérateur Mobile Money non disponible." });
     const ref = String(paiement.reference || "").trim().slice(0, 60);
     const telPayeur = String(paiement.telephone || "").trim().slice(0, 30);
@@ -294,7 +306,7 @@ router.post("/commandes", limiteCommandes, espacePublic, async (req, res) => {
   let numero;
   try {
     db.transaction(() => {
-      const clientId = trouverOuCreerClient(client);
+      const clientId = trouverOuCreerClient(client, vendeurId);
       numero = prochainNumero();
       const venteIds = [];
       const insVente = db.prepare(
@@ -444,7 +456,7 @@ router.get("/commandes/:jeton", espaceParJeton((req) => lireParJeton(req.params.
   const etapes = db.prepare("SELECT type, statut, texte, cree_le FROM commande_evenements WHERE commande_id = ? AND type <> 'note' ORDER BY cree_le")
     .all(cmd.id).map((e) => ({ ...e, cree_le: versIso(e.cree_le) }));
   const enLigne = db.prepare("SELECT payment_url, statut FROM paiements_en_ligne WHERE commande_id = ? ORDER BY cree_le DESC LIMIT 1").get(cmd.id);
-  const operateur = cfg.paiements.transfert.find((o) => o.mode === ligne?.mode_paiement);
+  const operateur = transfertPour(cfg, ligne?.vendeur_id).find((o) => o.mode === ligne?.mode_paiement);
   res.json({
     ...t,
     jeton: cmd.jeton_recu,

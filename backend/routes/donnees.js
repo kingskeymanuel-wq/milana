@@ -2,6 +2,7 @@ const express = require("express");
 const { nanoid } = require("nanoid");
 const db = require("../db");
 const { adminOnly } = require("../middleware/auth");
+const { clientsVisibles } = require("../lib/clients");
 const { versIso, idOuNouveau } = require("../lib/outils");
 const { lireBoutique, ecrireBoutique } = require("./parametres");
 const { resoudreImage } = require("../lib/images");
@@ -34,7 +35,8 @@ router.get("/", (req, res) => {
     espace: { id: espace.id, slug: espace.slug },
     equipe: db.prepare("SELECT id, nom, telephone, role, actif, cree_le FROM utilisateurs ORDER BY role, cree_le").all()
       .filter((u) => admin || u.id === moi).map((u) => ({ ...u, cree_le: versIso(u.cree_le) })),
-    clients: db.prepare("SELECT * FROM clients WHERE supprime = 0 ORDER BY cree_le").all().map((c) => ({ ...c, cree_le: versIso(c.cree_le) })),
+    // Un vendeur ne reçoit que ses propres clients
+    clients: clientsVisibles(req.user, { ordre: "ASC" }).map((c) => ({ ...c, cree_le: versIso(c.cree_le) })),
     // Les vendeurs ne voient ni les coûts d'achat ni les dépenses de la boutique
     packs: db.prepare("SELECT * FROM packs WHERE supprime = 0 ORDER BY cree_le").all().map((p) => (admin ? { ...p, cree_le: versIso(p.cree_le) }
       // Vendeur : ni coût d'achat, ni quantité en stock (seulement disponible ou en rupture), ni seuil d'alerte
@@ -53,6 +55,8 @@ router.get("/", (req, res) => {
       .filter((t) => idsCommandes.has(t.commande_id)).map((t) => ({ ...t, cree_le: versIso(t.cree_le) })),
     investissements: admin ? db.prepare("SELECT * FROM investissements ORDER BY date_invest DESC").all() : [],
     boutique: lireBoutique(),
+    // Mes numéros et liens de paiement personnels (vides : ceux de la boutique s'appliquent)
+    mes_paiements: require("../lib/moyensVendeur").lire(moi).valeurs,
   });
 });
 
