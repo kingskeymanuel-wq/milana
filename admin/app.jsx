@@ -1207,6 +1207,7 @@ const NAV = [
   { key: "vendeurs", label: "Vendeurs", icon: UserCheck, admin: true },
   { key: "marketing", label: "Marketing", icon: Megaphone, admin: true },
   { key: "finances", label: "Finances", icon: Landmark, admin: true },
+  { key: "caisse", label: "Caisse", icon: Banknote, admin: true, serveur: true },
 ];
 /* Pages visibles selon le rôle : le vendeur vend, remet les tickets et suit les livraisons (ni produits, ni prix,
    ni stocks, ni dépenses, ni marketing, ni finances) */
@@ -2384,6 +2385,7 @@ function PageAccueil() {
       />
 
       {mode === "api" && <CarteLien />}
+      {mode === "api" && !estAdmin && <CarteARemettre />}
 
       {baseVide && (
         <div className="card onboarding" style={{ marginBottom: 16 }}>
@@ -2917,7 +2919,7 @@ function PageFormations() {
 
 function PageDepenses() {
   const { data, mode, toast, confirm, rafraichir, estAdmin, auth } = useApp();
-  const vide = { libelle: "", categorie: "Transport", montant: "", date: isoDate(new Date()), note: "" };
+  const vide = { libelle: "", categorie: "Transport", montant: "", date: isoDate(new Date()), note: "", moyen: "Espèces" };
   const [f, setF] = useState(vide);
   const [ouvert, setOuvert] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -2976,6 +2978,7 @@ function PageDepenses() {
             <Field label="Date"><Input type="date" value={f.date} max={isoDate(new Date())} onChange={(e) => setF({ ...f, date: e.target.value })} /></Field>
           </div>
           <Field label="Catégorie"><div className="chips">{CATEGORIES_DEPENSE.map((c) => <button type="button" key={c} className={cx("chip", f.categorie === c && "on")} onClick={() => setF({ ...f, categorie: c })}>{c}</button>)}</div></Field>
+          <Field label="Payée en" help="Une dépense payée en espèces sort de la caisse du jour."><div className="chips">{["Espèces", "Mobile Money"].map((m) => <button type="button" key={m} className={cx("chip", f.moyen === m && "on")} onClick={() => setF({ ...f, moyen: m })}>{m}</button>)}</div></Field>
           <Field label="Note" optional><Input value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} /></Field>
         </div>
       </Modal>
@@ -5088,6 +5091,174 @@ function PageMarketing({ route }) {
 /* =====================================================================
    PAGE : Finances (investissements & rentabilité)
    ===================================================================== */
+/* =====================================================================
+   PAGE : Caisse du jour (administrateur) — fond, espèces attendues, comptage, écarts,
+   et argent détenu par les vendeurs et les livreurs (remises)
+   ===================================================================== */
+function RemiseModal({ detenteur, onClose, onFait }) {
+  const { toast } = useApp();
+  const [f, setF] = useState({ montant: "", moyen: "Espèces", note: "" });
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { if (detenteur) setF({ montant: String(Math.max(0, detenteur.detenu)), moyen: "Espèces", note: "" }); }, [detenteur?.id]);
+  const valider = async () => {
+    if (!(Number(f.montant) > 0)) return toast({ title: "Indiquez le montant remis", tone: "critical" });
+    setBusy(true);
+    try {
+      await apiFetch("POST", "/api/caisse/remises", { de_type: detenteur.type, de_id: detenteur.id, montant: Number(f.montant), moyen: f.moyen, note: f.note });
+      toast({ title: "Remise enregistrée", desc: `${detenteur.nom} · ${fmt(Number(f.montant))}` });
+      onFait();
+    } catch (e) { toast({ title: "Enregistrement impossible", desc: e.message, tone: "critical" }); }
+    finally { setBusy(false); }
+  };
+  return (
+    <Modal open={!!detenteur} onClose={onClose} title={`Argent remis par ${detenteur?.nom || ""}`} size="sm"
+      footer={<><Btn onClick={onClose}>Annuler</Btn><Btn variant="primary" loading={busy} onClick={valider}>Enregistrer la remise</Btn></>}>
+      <div className="stack">
+        <p className="subtle" style={{ margin: 0 }}>Il détient <b className="num">{fmt(detenteur?.detenu || 0)}</b>. Comptez l'argent reçu avant d'enregistrer.</p>
+        <Field label="Montant reçu"><Input value={f.montant} onChange={(e) => setF({ ...f, montant: e.target.value.replace(/[^\d]/g, "") })} suffix="FCFA" inputMode="numeric" autoFocus /></Field>
+        <Field label="Reçu en"><div className="chips">{["Espèces", "Wave", "Orange Money", "MTN MoMo", "Moov Money"].map((m) => <button type="button" key={m} className={cx("chip", f.moyen === m && "on")} onClick={() => setF({ ...f, moyen: m })}>{m}</button>)}</div></Field>
+        <Field label="Note" optional><Input value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} placeholder="Ex : recette de la tournée de Cocody" /></Field>
+      </div>
+    </Modal>
+  );
+}
+
+function PageCaisse() {
+  const { toast, confirm, mode } = useApp();
+  const [jour, setJour] = useState(isoDate(new Date()));
+  const [c, setC] = useState(null);
+  const [fond, setFond] = useState("");
+  const [compte, setCompte] = useState({ especes: "", note: "" });
+  const [remise, setRemise] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const charger = useCallback(async () => {
+    try { const r = await apiFetch("GET", `/api/caisse?jour=${jour}`); setC(r); setFond((f) => f || String(r.fond_suggere || "")); }
+    catch (e) { toast({ title: "Caisse indisponible", desc: e.message, tone: "critical" }); }
+  }, [jour]);
+  useEffect(() => { setC(null); charger(); }, [charger]);
+  if (mode !== "api") return <><PageHeader title="Caisse" /><Card><EmptyState icon={Banknote} title="Disponible avec le serveur" /></Card></>;
+  if (!c) return <SkeletonPage />;
+  const s = c.session, k = c.calcul, aujourdhui = jour === isoDate(new Date());
+  const ecart = compte.especes === "" ? null : Number(compte.especes) - k.theorique;
+  const action = async (fn, ok) => { setBusy(true); try { await fn(); toast({ title: ok }); await charger(); } catch (e) { toast({ title: "Action impossible", desc: e.message, tone: "critical" }); } finally { setBusy(false); } };
+  const ouvrir = () => action(() => apiFetch("POST", "/api/caisse/ouvrir", { jour, fond_initial: Number(fond) || 0 }), "Caisse ouverte");
+  const fermer = () => action(async () => { await apiFetch("POST", "/api/caisse/fermer", { jour, especes_comptees: Number(compte.especes), note: compte.note }); setCompte({ especes: "", note: "" }); }, "Caisse fermée");
+  const annulerRemise = async (r) => { if (await confirm({ title: "Annuler cette remise ?", message: `${fmt(r.montant)} (${r.moyen})`, confirmLabel: "Annuler la remise", tone: "critical" })) action(() => apiFetch("DELETE", `/api/caisse/remises/${r.id}`), "Remise annulée"); };
+  const detenus = c.detenteurs.filter((d) => d.encaisse > 0 || d.remis > 0);
+  const totalDetenu = detenus.reduce((x, d) => x + Math.max(0, d.detenu), 0);
+  const ligne = (label, montant, signe, sous) => (
+    <div className="row-between" style={{ padding: "8px 0", borderBottom: "1px solid var(--divider)" }}>
+      <span><span className="strong">{label}</span>{sous && <div className="subtle">{sous}</div>}</span>
+      <b className="num" style={{ color: signe < 0 ? "var(--critical)" : undefined }}>{signe < 0 ? "−" : signe > 0 ? "+" : ""}{fmt(montant)}</b>
+    </div>
+  );
+  return (
+    <>
+      <PageHeader title="Caisse" meta={<>Espèces de la boutique et argent détenu par vos vendeurs et livreurs</>}
+        actions={<Input type="date" value={jour} max={isoDate(new Date())} onChange={(e) => setJour(e.target.value || isoDate(new Date()))} aria-label="Jour" />} />
+
+      <div className="grid-main">
+        <Card title={aujourdhui ? "Caisse du jour" : `Caisse du ${fmtDate(jour)}`}
+          sub={!s ? "Pas encore ouverte" : s.fermee_le ? `Fermée à ${new Date(s.fermee_le).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}` : "Ouverte"}
+          actions={s ? <Badge tone={s.fermee_le ? (s.ecart ? "warning" : "success") : "info"} dot>{s.fermee_le ? (s.ecart ? "Écart " + (s.ecart > 0 ? "+" : "−") + fmt(Math.abs(s.ecart)) : "Juste") : "Ouverte"}</Badge> : null}>
+          {!s ? (
+            <div className="stack">
+              <p className="subtle" style={{ margin: 0 }}>Comptez les espèces présentes dans le tiroir avant la première vente : c'est le fond de caisse.</p>
+              <Field label="Fond de caisse" help={c.fond_suggere ? `Espèces comptées à la dernière fermeture : ${fmt(c.fond_suggere)}` : null}>
+                <Input value={fond} onChange={(e) => setFond(e.target.value.replace(/[^\d]/g, ""))} suffix="FCFA" inputMode="numeric" />
+              </Field>
+              <div className="row" style={{ justifyContent: "flex-end" }}><Btn variant="primary" icon={Banknote} loading={busy} onClick={ouvrir}>Ouvrir la caisse</Btn></div>
+            </div>
+          ) : (
+            <>
+              {ligne("Fond de caisse", k.fond, 0)}
+              {ligne("Espèces encaissées par la boutique", k.especes_caisse, 1, `${c.encaissements_caisse.length} commande(s)`)}
+              {ligne("Remises reçues en espèces", k.remises_especes, 1, "Vendeurs et livreurs")}
+              {ligne("Dépenses payées en espèces", k.depenses_especes, -1)}
+              <div className="row-between" style={{ padding: "12px 0 4px" }}><span className="strong">Espèces attendues dans la caisse</span><span className="kpi-value num" style={{ fontSize: 24 }}>{fmt(k.theorique)}</span></div>
+              {s.fermee_le ? (
+                <div className="stack-sm" style={{ marginTop: 8 }}>
+                  {ligne("Espèces comptées", s.especes_comptees, 0)}
+                  {s.note && <div className="banner banner-warning"><Info size={16} /><div>{s.note}</div></div>}
+                </div>
+              ) : (
+                <div className="stack" style={{ marginTop: 12 }}>
+                  <Field label="Espèces comptées à la fermeture"><Input value={compte.especes} onChange={(e) => setCompte({ ...compte, especes: e.target.value.replace(/[^\d]/g, "") })} suffix="FCFA" inputMode="numeric" /></Field>
+                  {ecart !== null && <div className={cx("banner", ecart === 0 ? "banner-success" : "banner-warning")}>{ecart === 0 ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}<div>{ecart === 0 ? "La caisse est juste." : `Écart de ${ecart > 0 ? "+" : "−"}${fmt(Math.abs(ecart))} : expliquez-le avant de fermer.`}</div></div>}
+                  {ecart !== null && ecart !== 0 && <Field label="Explication de l'écart"><Input value={compte.note} onChange={(e) => setCompte({ ...compte, note: e.target.value })} placeholder="Ex : monnaie rendue en trop" /></Field>}
+                  <div className="row" style={{ justifyContent: "flex-end" }}><Btn variant="primary" icon={Lock} loading={busy} disabled={compte.especes === "" || (ecart !== 0 && compte.note.trim().length < 3)} onClick={fermer}>Fermer la caisse</Btn></div>
+                </div>
+              )}
+            </>
+          )}
+        </Card>
+
+        <Card title="Sur les comptes de la boutique" sub="Mobile Money, carte, paiement en ligne : rien à compter dans le tiroir">
+          {Object.keys(c.comptes).length === 0 ? <EmptyState icon={Smartphone} title="Rien ce jour-là" /> :
+            Object.entries(c.comptes).sort((a, b) => b[1] - a[1]).map(([m, v]) => <div key={m} className="row-between" style={{ padding: "8px 0", borderBottom: "1px solid var(--divider)" }}><span className="row" style={{ gap: 8 }}><ModePaiement mode={m} taille={20} />{m}</span><b className="num">{fmt(v)}</b></div>)}
+        </Card>
+      </div>
+
+      <Card title="Argent détenu par vos vendeurs et livreurs" sub={totalDetenu ? `${fmt(totalDetenu)} encore à vous remettre` : "Tout a été remis"} padded={false} style={{ marginTop: 16 }}>
+        {detenus.length === 0 ? <EmptyState icon={Users} title="Personne ne détient d'argent">Les espèces encaissées par vos vendeurs, et celles reçues à la livraison par vos livreurs, apparaîtront ici.</EmptyState> : (
+          <div className="table-scroll"><table className="table">
+            <thead><tr><th>Personne</th><th className="right hide-sm">Encaissé</th><th className="right hide-sm">Remis</th><th className="right">Détient</th><th style={{ width: 120 }} /></tr></thead>
+            <tbody>{detenus.map((d) => (
+              <tr key={d.type + d.id}>
+                <td className="wrap"><div className="cell-main">{d.nom}</div><div className="cell-sub">{d.type === "livreur" ? "Livreur" : "Vendeur"}{d.mobile ? ` · dont ${fmt(d.mobile)} sur son Mobile Money` : ""}</div></td>
+                <td className="right num hide-sm">{fmt(d.encaisse)}</td><td className="right num hide-sm">{fmt(d.remis)}</td>
+                <td className="right num strong" style={{ color: d.detenu > 0 ? "var(--warning)" : d.detenu < 0 ? "var(--critical)" : "var(--success)" }}>{fmt(d.detenu)}</td>
+                <td className="right">{d.detenu > 0 && <Btn size="sm" variant="primary" onClick={() => setRemise(d)}>Recevoir</Btn>}</td>
+              </tr>))}</tbody>
+          </table></div>
+        )}
+      </Card>
+
+      <div className="grid-2" style={{ marginTop: 16 }}>
+        <Card title="Remises du jour" padded={false}>
+          {c.remises.length === 0 ? <EmptyState icon={Banknote} title="Aucune remise ce jour-là" /> : (
+            <div className="list">{c.remises.map((r) => { const d = c.detenteurs.find((x) => x.id === r.de_id); return (
+              <div key={r.id} className="list-item"><div className="grow"><div className="row-between"><span className="strong">{d?.nom || "—"}</span><b className="num">{fmt(r.montant)}</b></div><div className="row-between"><span className="subtle">{r.moyen}{r.note ? " · " + r.note : ""}</span><button className="icon-btn danger" onClick={() => annulerRemise(r)} aria-label="Annuler la remise"><Trash2 size={14} /></button></div></div></div>); })}</div>
+          )}
+        </Card>
+        <Card title="Historique des caisses" padded={false}>
+          {c.historique.length === 0 ? <EmptyState icon={Clock} title="Aucune journée enregistrée" /> : (
+            <div className="table-scroll"><table className="table">
+              <thead><tr><th>Jour</th><th className="right hide-sm">Attendu</th><th className="right">Compté</th><th className="right">Écart</th></tr></thead>
+              <tbody>{c.historique.map((h) => (
+                <tr key={h.id} style={{ cursor: "pointer" }} onClick={() => setJour(h.jour)}>
+                  <td>{fmtDate(h.jour)}</td><td className="right num hide-sm">{h.fermee_le ? fmt(h.theorique) : "—"}</td><td className="right num">{h.fermee_le ? fmt(h.especes_comptees) : <Badge tone="info">Ouverte</Badge>}</td>
+                  <td className="right num strong" style={{ color: !h.fermee_le ? undefined : h.ecart ? "var(--warning)" : "var(--success)" }}>{h.fermee_le ? (h.ecart ? (h.ecart > 0 ? "+" : "−") + fmt(Math.abs(h.ecart)) : "Juste") : ""}</td>
+                </tr>))}</tbody>
+            </table></div>
+          )}
+        </Card>
+      </div>
+      <RemiseModal detenteur={remise} onClose={() => setRemise(null)} onFait={() => { setRemise(null); charger(); }} />
+    </>
+  );
+}
+
+/* Vendeur : l'argent qu'il a encaissé et qu'il doit encore remettre à la boutique */
+function CarteARemettre() {
+  const { mode, data } = useApp();
+  const [s, setS] = useState(null);
+  useEffect(() => { if (mode === "api") apiFetch("GET", "/api/caisse/moi").then(setS).catch(() => setS(null)); }, [mode, data.ventes.length, data.commandes.length]);
+  if (!s || (!s.encaisse && !s.remis)) return null;
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div className="card-body row" style={{ gap: 14, flexWrap: "wrap" }}>
+        <span className="todo-icon tint-1" style={{ width: 44, height: 44, borderRadius: 12 }}><Banknote size={20} /></span>
+        <div className="grow" style={{ minWidth: 200 }}>
+          <div className="strong">{s.detenu > 0 ? "Argent à remettre à la boutique" : "Tout est remis"}</div>
+          <div className="subtle">Encaissé {fmt(s.encaisse)} · déjà remis {fmt(s.remis)}{s.mobile ? ` · dont ${fmt(s.mobile)} reçus sur votre Mobile Money` : ""}</div>
+        </div>
+        <div className="kpi-value num" style={{ color: s.detenu > 0 ? "var(--warning)" : "var(--success)" }}>{fmt(s.detenu)}</div>
+      </div>
+    </div>
+  );
+}
+
 function PageFinances({ route }) {
   const { data, update, sync, go, toast, confirm } = useApp();
   const [periode, setPeriode] = useState("mois");
@@ -6033,6 +6204,7 @@ function App() {
     case "stocks": content = estAdmin ? <PageStocks route={route} /> : <AccesReserve />; break;
     case "marketing": content = estAdmin ? <PageMarketing route={route} /> : <AccesReserve />; break;
     case "finances": content = estAdmin ? <PageFinances route={route} /> : <AccesReserve />; break;
+    case "caisse": content = estAdmin ? <PageCaisse /> : <AccesReserve />; break;
     case "vendeurs": content = estAdmin ? <PageVendeurs /> : <AccesReserve />; break;
     case "tickets": content = <PageTickets route={route} />; break;
     case "livraisons": content = <PageLivraisons />; break;

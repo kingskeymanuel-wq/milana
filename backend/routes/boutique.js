@@ -327,6 +327,7 @@ router.post("/commandes", limiteCommandes, espacePublic, async (req, res) => {
       ).run(commandeId, venteIds[0], numero, [client.adresse, client.ville].filter(Boolean).join(", "), client.instructions || null,
         jeton, frais, client.telephone, client.email || null, maintenant);
       ajouterEvenement(commandeId, { statut: "en_attente", texte: "Commande passée sur la boutique en ligne", date: maintenant });
+      if (modePaiement === "transfert" && vendeurId && moyensVendeur.transfert(vendeurId).length) db.prepare("UPDATE ventes SET sur_compte_vendeur = 1 WHERE commande_id = ?").run(commandeId);
       genererTicket(commandeId, vendeurId, maintenant);
       if (avecRemise) {
         db.prepare("UPDATE diagnostics SET remise_utilisee_le = ?, commande_id = ? WHERE id = ?").run(maintenant, commandeId, diag.id);

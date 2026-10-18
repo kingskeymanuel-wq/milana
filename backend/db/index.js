@@ -67,6 +67,15 @@ function ouvrirEspace(fichier) {
     BEGIN UPDATE ventes SET cout_unitaire = (SELECT cout FROM packs WHERE id = NEW.pack_id) WHERE id = NEW.id; END;
   CREATE TRIGGER IF NOT EXISTS ventes_cout_echange AFTER UPDATE OF pack_id ON ventes WHEN NEW.pack_id <> OLD.pack_id
     BEGIN UPDATE ventes SET cout_unitaire = (SELECT cout FROM packs WHERE id = NEW.pack_id) WHERE id = NEW.id; END;`);
+  // Caisse du jour et remises d'argent des vendeurs / livreurs
+  db.exec(`CREATE TABLE IF NOT EXISTS caisse_sessions (
+    id TEXT PRIMARY KEY, jour TEXT NOT NULL UNIQUE, fond_initial INTEGER NOT NULL DEFAULT 0, ouverte_par TEXT, ouverte_le TEXT NOT NULL,
+    especes_comptees INTEGER, theorique INTEGER, ecart INTEGER, note TEXT, fermee_par TEXT, fermee_le TEXT);
+  CREATE TABLE IF NOT EXISTS caisse_remises (
+    id TEXT PRIMARY KEY, jour TEXT NOT NULL, de_type TEXT NOT NULL, de_id TEXT NOT NULL, montant INTEGER NOT NULL,
+    moyen TEXT NOT NULL DEFAULT 'Espèces', note TEXT, recu_par TEXT, cree_le TEXT NOT NULL);`);
+  ajouterColonne("ventes", "encaisse_par", "TEXT"); // qui a encaissé (paiement à la livraison confirmé plus tard)
+  ajouterColonne("ventes", "sur_compte_vendeur", "INTEGER NOT NULL DEFAULT 0"); // 1 = payé sur le Mobile Money personnel du vendeur
   ajouterColonne("utilisateurs", "paiements", "TEXT"); // moyens de paiement personnels du vendeur (JSON)
   ajouterColonne("clients", "vendeur_id", "TEXT"); // vendeur qui a apporté le client (null : client de la boutique)
   db.exec("UPDATE ventes SET commande_id = (SELECT c.id FROM commandes c WHERE c.vente_id = ventes.id) WHERE commande_id IS NULL");
@@ -100,6 +109,7 @@ function ouvrirEspace(fichier) {
   db.exec(`CREATE TABLE IF NOT EXISTS depenses (
     id TEXT PRIMARY KEY, libelle TEXT NOT NULL, categorie TEXT NOT NULL DEFAULT 'Autre', montant REAL NOT NULL,
     date_depense TEXT NOT NULL, note TEXT, auteur_id TEXT, cree_le TEXT NOT NULL)`);
+  ajouterColonne("depenses", "moyen", "TEXT NOT NULL DEFAULT 'Espèces'"); // dépense payée en espèces (sort de la caisse) ou autrement
   // MILANA : profil de soin des produits (pour le diagnostic) et diagnostics capillaires reçus
   ajouterColonne("packs", "soin_type", "TEXT");   // shampoo | conditioner | mask | serum | oil | pomade | accessory
   ajouterColonne("packs", "soin_cible", "TEXT");  // dry | damaged | curly | thin

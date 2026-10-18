@@ -127,6 +127,8 @@ router.patch("/:id/paiement", (req, res) => {
   const verification = lignes[0]?.statut_paiement === "a_verifier";
   db.transaction(() => {
     enregistrerPaiement(cmd, { mode: p.mode, statut: "payee", montantRecu: p.montant_recu, reference: p.reference, telephone: p.telephone, payeLe: maintenant });
+    db.prepare("UPDATE ventes SET encaisse_par = ? WHERE commande_id = ? OR id = ?").run(req.user?.id || null, cmd.id, cmd.vente_id || "");
+    require("../lib/caisse").marquerCompteVendeur(cmd.id, req.user?.id, p.mode);
     ajouterEvenement(cmd.id, { type: "paiement", texte: verification ? `Paiement vérifié et confirmé (${p.mode})` : `Paiement encaissé (${p.mode})`, auteurId: req.user?.id, date: maintenant });
   })();
   res.json(enrichir(lire(cmd.id)));

@@ -22,8 +22,9 @@ router.post("/", (req, res) => {
   if (!(montant > 0)) return res.status(400).json({ erreur: "Indiquez le montant de la dépense" });
   const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.body.date || "")) ? req.body.date : new Date().toISOString().slice(0, 10);
   const id = nanoid();
-  db.prepare("INSERT INTO depenses (id, libelle, categorie, montant, date_depense, note, auteur_id, cree_le) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-    .run(id, libelle, CATEGORIES.includes(req.body.categorie) ? req.body.categorie : "Autre", montant, date, String(req.body.note || "").trim().slice(0, 300) || null, req.user.id, new Date().toISOString());
+  db.prepare("INSERT INTO depenses (id, libelle, categorie, montant, date_depense, note, auteur_id, cree_le, moyen) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    .run(id, libelle, CATEGORIES.includes(req.body.categorie) ? req.body.categorie : "Autre", montant, date, String(req.body.note || "").trim().slice(0, 300) || null, req.user.id, new Date().toISOString(),
+      req.body.moyen === "Mobile Money" ? "Mobile Money" : "Espèces");
   res.status(201).json(lister(req.user).find((d) => d.id === id));
 });
 
