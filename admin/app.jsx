@@ -1460,8 +1460,12 @@ function paiementVersServeur(v, total) {
   return { mode_paiement: l.paiement, montant_recu: l.montantRecu, telephone_paiement: l.telPaiement || null, reference_paiement: l.reference || null };
 }
 
+const LIENS_PAIEMENT = { "Wave": "lien_wave", "Orange Money": "lien_orange", "MTN MoMo": "lien_mtn", "Moov Money": "lien_moov" };
 function PaiementForm({ total, value, onChange, telClient, erreur, sansLivraison }) {
+  const { data } = useApp();
   const p = infoPaiement(value.mode);
+  // Lien de paiement réglé par l'administrateur pour cet opérateur (Paramètres › Moyens de paiement)
+  const lienPaiement = p.type === "mobile" ? String(data.boutique?.[LIENS_PAIEMENT[p.key]] || "").trim() : "";
   const modes = PAIEMENTS.filter((m) => m.type !== "en_ligne" && !(sansLivraison && m.type === "livraison"));
   const recu = value.recu === "" ? null : Number(value.recu);
   const set = (k, v) => onChange({ ...value, [k]: v });
@@ -1487,6 +1491,16 @@ function PaiementForm({ total, value, onChange, telClient, erreur, sansLivraison
         )}
         {p.type === "mobile" && (
           <>
+            {lienPaiement && /^https:\/\//.test(lienPaiement) && (
+              <div className="lien-caisse">
+                <QrCode texte={lienPaiement} taille={140} libelle={`QR code de paiement ${p.key}`} />
+                <div className="stack-sm">
+                  <b>Faites scanner ce QR code au client</b>
+                  <span className="subtle">Il paie {fmt(total)} avec {p.key} sur son téléphone, puis vous montre l'ID de transaction à saisir ci-dessous.</span>
+                  <a className="btn btn-sm" href={lienPaiement} target="_blank" rel="noopener noreferrer"><Link2 size={14} />Ouvrir le lien</a>
+                </div>
+              </div>
+            )}
             <Field label={`Numéro ${p.key} du payeur`} error={erreur}><Input icon={Phone} value={value.tel} onChange={(e) => set("tel", e.target.value)} placeholder="07 00 00 00 00" inputMode="tel" /></Field>
             <Field label="ID de transaction" optional help="Référence indiquée dans le SMS de confirmation de l'opérateur."><Input value={value.ref} onChange={(e) => set("ref", e.target.value)} placeholder="Ex : MP240929.1234.A5678" /></Field>
           </>
@@ -1546,11 +1560,11 @@ function useQr(texte) {
   return qr;
 }
 
-function QrCode({ texte, taille = 120 }) {
+function QrCode({ texte, taille = 120, libelle = "QR code du ticket" }) {
   const qr = useQr(texte);
   if (!qr) return <div className="qr-attente" style={{ width: taille, height: taille }}><span className="spinner" /></div>;
   const n = qr.getModuleCount();
-  return <svg className="qr" width={taille} height={taille} viewBox={`-2 -2 ${n + 4} ${n + 4}`} shapeRendering="crispEdges" role="img" aria-label="QR code du ticket"><rect x="-2" y="-2" width={n + 4} height={n + 4} fill="#fff" /><path d={cheminQr(qr)} fill="#000" /></svg>;
+  return <svg className="qr" width={taille} height={taille} viewBox={`-2 -2 ${n + 4} ${n + 4}`} shapeRendering="crispEdges" role="img" aria-label={libelle}><rect x="-2" y="-2" width={n + 4} height={n + 4} fill="#fff" /><path d={cheminQr(qr)} fill="#000" /></svg>;
 }
 
 function TicketCaisse({ t }) {
@@ -5207,7 +5221,7 @@ function CarteBoutiqueEnLigne({ estAdmin }) {
         </div>
 
         <div>
-          <div className="strong">Paiement Mobile Money : numéros et liens de paiement</div>
+          <div className="strong" id="moyens-paiement" style={{ scrollMarginTop: 80 }}>Moyens de paiement : numéros et liens (Wave, Orange, MTN, Moov)</div>
           <p className="subtle" style={{ marginBottom: 10 }}>Pour chaque opérateur, indiquez votre numéro marchand et/ou votre lien de paiement. Le client paie par le lien ou sur le numéro, puis saisit l'ID de transaction ; vous confirmez la réception depuis la commande. Laissez vide pour ne pas proposer un opérateur.</p>
           <div className="operateurs-paiement">
             {numeros.map(([k, nom, l]) => (
@@ -5345,6 +5359,18 @@ function PageParametres() {
   return (
     <div className="page-narrow" style={{ margin: "0 auto" }}>
       <PageHeader title="Paramètres" />
+      {enLigne && estAdmin && (() => {
+        const ops = [["Wave", "momo_wave", "lien_wave"], ["Orange Money", "momo_orange", "lien_orange"], ["MTN MoMo", "momo_mtn", "lien_mtn"], ["Moov Money", "momo_moov", "lien_moov"]];
+        const b = data.boutique || {};
+        return (
+          <Card title="Moyens de paiement" sub="Vos numéros marchands et liens de paiement : proposés aux clients sur la boutique en ligne et affichés en QR code à la caisse." style={{ marginBottom: 16 }}>
+            <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
+              {ops.map(([nom, n, l]) => <span key={nom} className="row" style={{ gap: 6 }}><ModePaiement mode={nom} taille={22} />{b[l] ? <Badge tone="success" dot>Lien</Badge> : null}{b[n] ? <Badge tone="info" dot>Numéro</Badge> : null}{!b[l] && !b[n] ? <Badge>Non réglé</Badge> : null}</span>)}
+            </div>
+            <div className="row" style={{ marginTop: 12 }}><Btn variant="primary" icon={Link2} onClick={() => document.getElementById("moyens-paiement")?.scrollIntoView({ behavior: "smooth", block: "start" })}>Ajouter ou modifier un lien de paiement</Btn></div>
+          </Card>
+        );
+      })()}
       <div className="stack">
         <Card title="Boutique" sub="Ces informations sont imprimées sur les tickets de caisse.">
           <div className="form-grid">

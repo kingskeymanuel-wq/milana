@@ -1547,3 +1547,9 @@ div.prix-barre { margin-left: 0; }
 .btn { transition: transform .2s cubic-bezier(.34, 1.56, .64, 1), background .15s, box-shadow .15s, border-color .15s; }
 .btn:active:not(:disabled) { transform: scale(.95); }
 @media (prefers-reduced-motion: reduce) { .page > .card, .layout-detail .card, .page { animation: none; } }
+
+/* Caisse : QR code du lien de paiement Mobile Money à faire scanner au client */
+.lien-caisse { display: flex; gap: 14px; align-items: center; padding: 12px; margin-bottom: 10px; border-radius: 12px; background: var(--surface-2, rgba(0,0,0,.03)); border: 1px solid var(--border, rgba(0,0,0,.08)); }
+.lien-caisse .qr { flex: none; border-radius: 8px; }
+.lien-caisse .btn { align-self: flex-start; gap: 6px; }
+@media (max-width: 420px) { .lien-caisse { flex-direction: column; align-items: flex-start; } }
