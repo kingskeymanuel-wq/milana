@@ -41,7 +41,7 @@ app.use(
         // L'interface compile son JSX dans le navigateur (Babel) et charge
         // React / les icônes depuis des CDN : d'où 'unsafe-eval' et ces origines.
         // cdnjs : génération du PDF (jsPDF) et du QR code des tickets de caisse
-        scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://esm.sh", "https://unpkg.com", "https://cdnjs.cloudflare.com"],
+        scriptSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com"],
         styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
         fontSrc: ["'self'", "https://fonts.gstatic.com"],
         // images.unsplash.com : photos d'illustration des produits de test
@@ -95,7 +95,7 @@ app.use("/api/dashboard", adminOnly, dashboardRoutes);
 app.use("/api/donnees", donneesRoutes);
 app.use("/api/parametres", parametresRoutes);
 app.use("/api/livreurs", livreursRoutes);
-app.use("/api/depenses", depensesRoutes);
+app.use("/api/depenses", adminOnly, depensesRoutes); // les vendeurs ne gèrent pas l'argent de la boutique
 app.use("/api/diagnostics", adminOnly, require("./routes/diagnostics"));
 app.use("/api/formations", adminOnly, require("./routes/formations"));
 

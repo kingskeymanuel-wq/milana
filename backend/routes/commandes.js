@@ -9,7 +9,7 @@ const { ticketEmail } = require("../lib/ticketEmail");
 const { adminOnly } = require("../middleware/auth");
 const { journaliser, ACTIONS_VENDEUR } = require("../lib/tickets");
 const { nanoid } = require("nanoid");
-const { mouvement } = require("../lib/stock");
+const { mouvementLots, lotsDisponibles } = require("../lib/stock");
 const { prixEffectif } = require("../lib/prix");
 const router = express.Router();
 
@@ -65,11 +65,14 @@ router.get("/:id", (req, res) => {
 
 // PATCH /api/commandes/:id/statut — { statut: "expediee" }
 // Une annulation remet les articles en stock ; un rétablissement les retire.
+/** Annuler ou rétablir une commande fait bouger le stock : seul l'administrateur le peut. */
+const annulationInterdite = (cmd, statut, req) => req.user?.role !== "admin" && (statut === "annulee" || cmd?.statut === "annulee");
 router.patch("/:id/statut", (req, res) => {
   const { statut } = req.body;
   if (!STATUTS_VALIDES.includes(statut)) {
     return res.status(400).json({ erreur: `statut doit être l'un de : ${STATUTS_VALIDES.join(", ")}` });
   }
+  if (annulationInterdite(lire(req.params.id), statut, req)) return res.status(403).json({ erreur: "Seul l'administrateur peut annuler ou rétablir une commande" });
   const cmd = db.transaction(() => changerStatut(req.params.id, statut, req.user?.id))();
   if (!cmd) return res.status(404).json({ erreur: "Commande introuvable" });
   res.json(enrichir(cmd));
@@ -82,7 +85,8 @@ router.post("/statut", (req, res) => {
   if (!STATUTS_VALIDES.includes(statut)) {
     return res.status(400).json({ erreur: `statut doit être l'un de : ${STATUTS_VALIDES.join(", ")}` });
   }
-  const autorises = ids.map(String).filter((id) => { const c = lire(id); return c && aMoi(c, req); });
+  if (statut === "annulee" && req.user?.role !== "admin") return res.status(403).json({ erreur: "Seul l'administrateur peut annuler une commande" });
+  const autorises = ids.map(String).filter((id) => { const c = lire(id); return c && aMoi(c, req) && !annulationInterdite(c, statut, req); });
   const modifiees = db.transaction(() => autorises.map((id) => changerStatut(id, statut, req.user?.id)).filter(Boolean))();
   res.json({ modifiees: modifiees.length });
 });
@@ -256,7 +260,7 @@ router.get("/:id/retours", (req, res) => {
  *  - échange : l'article est remplacé par un autre, la différence de prix est à rembourser ou à encaisser.
  * Le total, le ticket de caisse et le stock sont mis à jour ; le retour est tracé dans la chronologie.
  */
-router.post("/:id/retour", adminOnly, (req, res) => {
+router.post("/:id/retour", (req, res) => {
   const cmd = lire(req.params.id);
   if (!cmd) return res.status(404).json({ erreur: "Commande introuvable" });
   if (cmd.statut === "annulee") return res.status(400).json({ erreur: "Cette commande est annulée" });
@@ -272,7 +276,7 @@ router.post("/:id/retour", adminOnly, (req, res) => {
     const nb = lignes.reduce((s, l) => s + l.quantite, 0);
     db.transaction(() => {
       for (const l of lignes) {
-        if (remis) mouvement(l.pack_id, +l.quantite, "retour", { reference: cmd.numero, auteurId: req.user?.id, note: remarque });
+        if (remis) mouvementLots(l.pack_id, +l.quantite, "retour", { reference: cmd.numero, auteurId: req.user?.id, note: remarque });
         db.prepare("INSERT INTO retours (id, commande_id, pack_id, quantite, motif, montant, echange_pack_id, echange_montant, difference, remis_en_stock, note, auteur_id, cree_le) VALUES (?, ?, ?, ?, 'retractation', ?, NULL, 0, ?, ?, ?, ?, ?)")
           .run(nanoid(), cmd.id, l.pack_id, l.quantite, l.quantite * l.prix_unitaire, l.quantite * l.prix_unitaire, remis ? 1 : 0, remarque, req.user?.id || null, new Date().toISOString());
       }
@@ -290,7 +294,7 @@ router.post("/:id/retour", adminOnly, (req, res) => {
   if (motif === "retractation" && lignes.length === 1 && q === ligne.quantite) return res.status(400).json({ erreur: "Tous les articles sont retournés : annulez plutôt la commande." });
   const nouveau = motif === "echange" ? db.prepare("SELECT * FROM packs WHERE id = ? AND supprime = 0").get(String(req.body.echange_pack_id || "")) : null;
   if (motif === "echange" && !nouveau) return res.status(400).json({ erreur: "Choisissez l'article donné en échange" });
-  if (nouveau && nouveau.stock < q && nouveau.id !== ligne.pack_id) return res.status(400).json({ erreur: `Stock insuffisant pour ${nouveau.nom} (${nouveau.stock} disponible)` });
+  if (nouveau && lotsDisponibles(nouveau) < q && nouveau.id !== ligne.pack_id) return res.status(400).json({ erreur: `Stock insuffisant pour ${nouveau.nom} (${lotsDisponibles(nouveau)} disponible)` });
   const remettre = req.body.remettre_en_stock !== false;
   const note = String(req.body.note || "").trim().slice(0, 300) || null;
   const nomRendu = db.prepare("SELECT nom FROM packs WHERE id = ?").get(ligne.pack_id)?.nom || "Article";
@@ -314,8 +318,8 @@ router.post("/:id/retour", adminOnly, (req, res) => {
         db.prepare(`INSERT INTO ventes (${cols.join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`).run(...cols.map((k) => copie[k]));
       }
     }
-    if (remettre) mouvement(ligne.pack_id, +q, "retour", { reference: cmd.numero, auteurId: req.user?.id, note });
-    if (nouveau) mouvement(nouveau.id, -q, "vente", { reference: cmd.numero, auteurId: req.user?.id, note: "Échange" });
+    if (remettre) mouvementLots(ligne.pack_id, +q, "retour", { reference: cmd.numero, auteurId: req.user?.id, note });
+    if (nouveau) mouvementLots(nouveau.id, -q, "vente", { reference: cmd.numero, auteurId: req.user?.id, note: "Échange" });
     db.prepare("INSERT INTO retours (id, commande_id, pack_id, quantite, motif, montant, echange_pack_id, echange_montant, difference, remis_en_stock, note, auteur_id, cree_le) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
       .run(nanoid(), cmd.id, ligne.pack_id, q, motif, montant, nouveau?.id || null, montantEchange, difference, remettre ? 1 : 0, note, req.user?.id || null, new Date().toISOString());
     db.prepare("UPDATE commandes SET maj_le = ? WHERE id = ?").run(new Date().toISOString(), cmd.id);

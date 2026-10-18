@@ -438,7 +438,8 @@ function applyStatut(d, ids, statut) {
   const commandes = d.commandes.map((c) => {
     if (!set.has(c.id) || c.statut === statut) return c;
     for (const v of lignesDe(d, c)) {
-      const delta = statut === "annulee" ? v.qte : c.statut === "annulee" ? -v.qte : 0;
+      const art = v.qte * (d.packs.find((p) => p.id === v.packId)?.pieces || 1);
+      const delta = statut === "annulee" ? art : c.statut === "annulee" ? -art : 0;
       if (delta) packs = packs.map((p) => (p.id === v.packId ? { ...p, stock: Math.max(0, p.stock + delta) } : p));
     }
     return { ...c, statut, historique: [...(c.historique || []), { statut, date: now }] };
@@ -451,7 +452,7 @@ function deleteCommande(d, id) {
   if (!c) return d;
   const lignes = lignesDe(d, c);
   let packs = d.packs;
-  if (c.statut !== "annulee") for (const v of lignes) packs = packs.map((p) => (p.id === v.packId ? { ...p, stock: p.stock + v.qte } : p));
+  if (c.statut !== "annulee") for (const v of lignes) packs = packs.map((p) => (p.id === v.packId ? { ...p, stock: p.stock + v.qte * (p.pieces || 1) } : p));
   const ids = new Set(lignes.map((v) => v.id));
   return { ...d, packs, commandes: d.commandes.filter((x) => x.id !== id), ventes: d.ventes.filter((x) => !ids.has(x.id)) };
 }
@@ -1198,18 +1199,22 @@ const NAV = [
   { key: "clients", label: "Clients", icon: Users, admin: true },
   { key: "diagnostics", label: "Diagnostics", icon: Sparkles, admin: true },
   { key: "formations", label: "Formations", icon: FileText, admin: true },
-  { key: "depenses", label: "Dépenses", icon: Wallet },
+  { key: "depenses", label: "Dépenses", icon: Wallet, admin: true },
   { key: "ventes", label: "Ventes", icon: Receipt },
   { key: "tickets", label: "Tickets de caisse", icon: FileText, badge: (d) => d.commandes.filter((c) => c.statut !== "annulee" && !c.ticketRemisLe).length },
   { key: "vendeurs", label: "Vendeurs", icon: UserCheck, admin: true },
   { key: "marketing", label: "Marketing", icon: Megaphone, admin: true },
   { key: "finances", label: "Finances", icon: Landmark, admin: true },
 ];
-/* Pages visibles selon le rôle (le vendeur n'a ni stocks, ni marketing, ni finances) */
+/* Pages visibles selon le rôle : le vendeur vend, remet les tickets et suit les livraisons (ni produits, ni prix,
+   ni stocks, ni dépenses, ni marketing, ni finances) */
 const navPour = (estAdmin) => NAV.filter((n) => estAdmin || !n.admin);
 
 /* Vendeur : le serveur ne transmet pas les quantités en stock (9999 = disponible, 0 = rupture) */
 const stockCache = (p) => p?.stock >= 9999;
+/* Le stock est compté en articles ; un « lot de 3 » vendu en sort 3. Lots encore vendables : */
+const lotsDispo = (p) => (stockCache(p) ? Infinity : Math.floor(Math.max(0, Number(p?.stock) || 0) / Math.max(1, Number(p?.pieces) || 1)));
+const libelleStock = (p) => (stockCache(p) ? "Disponible" : `${fmtNum(p.stock)} article${p.stock > 1 ? "s" : ""} en stock${(p.pieces || 1) > 1 ? ` · ${fmtNum(lotsDispo(p))} lot${lotsDispo(p) > 1 ? "s" : ""} de ${p.pieces}` : ""}`);
 
 function useNotifications(data) {
   return useMemo(() => {
@@ -1315,7 +1320,7 @@ function BottomNav({ onMenu }) {
       {item("accueil", "Accueil", Home)}
       {item("commandes", "Commandes", ShoppingCart, badge)}
       <div className="bn-fab-wrap"><button className="bn-fab" onClick={() => openSale()} aria-label="Nouvelle vente"><Plus size={24} strokeWidth={2.5} /></button></div>
-      {estAdmin ? item("clients", "Clients", Users) : item("depenses", "Dépenses", Wallet)}
+      {estAdmin ? item("clients", "Clients", Users) : item("livraisons", "Livraisons", Truck, data.commandes.filter((c) => c.livraison && !["livree", "annulee"].includes(c.statut)).length)}
       <button className="bn-item" onClick={onMenu}><Menu size={21} />Menu</button>
     </nav>
   );
@@ -1692,8 +1697,7 @@ function SaleModal({ open, preset, onClose }) {
   const [c, setC] = useState(vide);
   const [cat, setCat] = useState("");
   const [qp, setQp] = useState("");
-  const [packId, setPackId] = useState("");
-  const [qte, setQte] = useState(1);
+  const [panier, setPanier] = useState([]); // [{ packId, qte }] : plusieurs produits dans une même vente
   const [livraison, setLivraison] = useState(false);
   const [frais, setFrais] = useState("");
   const [b2b, setB2b] = useState(false);
@@ -1706,7 +1710,7 @@ function SaleModal({ open, preset, onClose }) {
   const reinitialiser = () => {
     const cl = data.clients.find((x) => x.id === preset?.clientId);
     setC(cl ? { tel: cl.tel, nom: cl.nom, adresse: "", ville: cl.ville || "" } : vide);
-    setCat(""); setQp(""); setPackId(preset?.packId || ""); setQte(1); setLivraison(false); setFrais(String(fraisBoutique || "")); setB2b(false);
+    setCat(""); setQp(""); setPanier(preset?.packId ? [{ packId: preset.packId, qte: 1 }] : []); setLivraison(false); setFrais(String(fraisBoutique || "")); setB2b(false);
     setPay(paiementVide()); setErr({}); setDone(null); setSaving(false); setApercu(false);
   };
   useEffect(() => { if (open) reinitialiser(); }, [open]);
@@ -1718,14 +1722,16 @@ function SaleModal({ open, preset, onClose }) {
   const actifs = data.packs.filter((p) => p.actif !== false);
   const categories = [...new Set(actifs.map((p) => p.categorie).filter(Boolean))].sort((a, b) => a.localeCompare(b, "fr"));
   const packs = actifs.filter((p) => (!cat || p.categorie === cat) && norm(p.nom + " " + (p.sku || "")).includes(norm(qp)));
-  const pack = data.packs.find((p) => p.id === packId);
-  const parLot = pack?.pieces || 1;
-  const prixU = prixEffectif(pack);
-  const sousTotal = pack ? prixU * qte : 0;
-  const montantFrais = livraison ? Math.max(0, Number(estAdmin ? frais : fraisBoutique) || 0) : 0;
+  const lignesPanier = panier.map((l) => { const p = data.packs.find((x) => x.id === l.packId); return p && { ...l, pack: p, prixU: prixEffectif(p), parLot: p.pieces || 1 }; }).filter(Boolean);
+  const pack = lignesPanier[0]?.pack;
+  const sousTotal = lignesPanier.reduce((s, l) => s + l.prixU * l.qte, 0);
+  const articlesPanier = lignesPanier.reduce((s, l) => s + l.qte * l.parLot, 0);
+  // Frais de livraison : montant convenu avec le client, saisi par le vendeur (imprimé sur le ticket)
+  const montantFrais = livraison ? Math.max(0, Number(frais) || 0) : 0;
+  const basculerArticle = (p) => { setPanier((l) => (l.some((x) => x.packId === p.id) ? l.filter((x) => x.packId !== p.id) : [...l, { packId: p.id, qte: 1 }])); setErr((e) => ({ ...e, pack: null })); };
+  const changerQte = (id, q) => setPanier((l) => l.map((x) => (x.packId === id ? { ...x, qte: q } : x)));
   const total = sousTotal + montantFrais;
   const set = (k, v) => { setC((s) => ({ ...s, [k]: v })); setErr((e) => ({ ...e, [k]: null })); };
-  useEffect(() => { if (pack && qte > pack.stock) setQte(Math.max(1, pack.stock)); }, [packId]);
 
   const basculerLivraison = (v) => {
     setLivraison(v);
@@ -1739,8 +1745,9 @@ function SaleModal({ open, preset, onClose }) {
     const e = {};
     if (chiffres(c.tel).length < 8) e.tel = "Numéro du client requis.";
     if (livraison && !adresseComplete) e.adresse = "Indiquez l'adresse ou la ville de livraison.";
-    if (!pack) e.pack = "Cliquez sur un article.";
-    if (pack && qte > pack.stock) e.pack = `Stock insuffisant (${pack.stock} disponible${pack.stock > 1 ? "s" : ""}).`;
+    if (!lignesPanier.length) e.pack = "Cliquez sur un ou plusieurs articles.";
+    const manque = lignesPanier.find((l) => l.qte > lotsDispo(l.pack));
+    if (manque) e.pack = `Stock insuffisant pour ${manque.pack.nom} (${lotsDispo(manque.pack)} disponible${lotsDispo(manque.pack) > 1 ? "s" : ""}).`;
     const ep = validerPaiementLocal(pay, total);
     if (ep) e.pay = ep;
     setErr(e);
@@ -1754,7 +1761,7 @@ function SaleModal({ open, preset, onClose }) {
     return {
       provisoire: true, boutique: data.boutique || boutiqueParDefaut(), numero: null, date: new Date().toISOString(), statut: "en_attente", type_vente: b2b ? "b2b" : "b2c",
       vendeur: auth?.utilisateur?.nom ? nomCourt(auth.utilisateur.nom) : null, client: nomCourt(nomClient), contact: c.tel.trim(), adresse_livraison: adresseComplete || null, canal: "boutique",
-      lignes: [{ nom: pack.nom, quantite: qte, prix_unitaire: prixU, prix_normal: pack.prix > prixU ? pack.prix : null, total: sousTotal, pieces_par_lot: parLot, articles: qte * parLot }], total_articles: qte * parLot,
+      lignes: lignesPanier.map((l) => ({ nom: l.pack.nom, quantite: l.qte, prix_unitaire: l.prixU, prix_normal: l.pack.prix > l.prixU ? l.pack.prix : null, total: l.prixU * l.qte, pieces_par_lot: l.parLot, articles: l.qte * l.parLot })), total_articles: articlesPanier,
       sous_total: sousTotal, frais_livraison: montantFrais, total,
       paiement: { mode: l.paiement, statut: l.statutPaiement, montant_recu: l.montantRecu, monnaie: l.montantRecu != null ? Math.max(0, l.montantRecu - total) : null, reference: l.reference || null },
       lien: null,
@@ -1766,21 +1773,21 @@ function SaleModal({ open, preset, onClose }) {
     setSaving(true);
     setTimeout(async () => {
       const now = new Date();
-      const venteId = uid(), cmdId = uid();
+      const ids = lignesPanier.map(() => uid()), venteId = ids[0], cmdId = uid();
       const newClient = !client ? { id: uid(), nom: nomClient, tel: c.tel.trim(), email: "", ville: c.ville.trim(), statut: "Standard", notes: "", dateAjout: isoDate(now), consentement: false } : null;
       const cl = client || newClient;
       update((d) => ({
         ...d,
         clients: newClient ? [...d.clients, newClient] : d.clients,
-        ventes: [...d.ventes, { id: venteId, commandeId: cmdId, clientId: cl.id, packId: pack.id, vendeurId: d.moi || null, qte, prixUnitaire: prixU, date: isoDate(now), heure: hhmm(now), vendeur: auth?.utilisateur?.nom || "", ...paiementLocal(pay, total) }],
-        packs: d.packs.map((p) => (p.id === pack.id ? { ...p, stock: Math.max(0, p.stock - qte) } : p)),
+        ventes: [...d.ventes, ...lignesPanier.map((l, i) => ({ id: ids[i], commandeId: cmdId, clientId: cl.id, packId: l.pack.id, vendeurId: d.moi || null, qte: l.qte, prixUnitaire: l.prixU, date: isoDate(now), heure: hhmm(now), vendeur: auth?.utilisateur?.nom || "", ...paiementLocal(pay, total) }))],
+        packs: d.packs.map((p) => { const l = lignesPanier.find((x) => x.pack.id === p.id); return l && !stockCache(p) ? { ...p, stock: Math.max(0, p.stock - l.qte * l.parLot) } : p; }),
         commandes: [...d.commandes, { id: cmdId, venteId, numero: nextNumero(d), numeroTicket: nextTicket(d), typeVente: b2b ? "b2b" : "b2c", ticketRemisLe: null, statut: "en_attente", adresseLivraison: adresseComplete || cl.ville || "", contactTel: c.tel.trim(), note: "", canal: "boutique", fraisLivraison: montantFrais, livraison, livreurId: null, livraisonPrevue: null, tentatives: 0, historique: [{ statut: "en_attente", date: now.toISOString() }] }],
         tickets: [...(d.tickets || []), { id: uid(), commandeId: cmdId, action: "genere", auteurId: d.moi || null, date: now.toISOString() }],
       }));
       // Connecté au serveur : on attend sa confirmation (stock vérifié, numéro de ticket attribué)
       const res = await sync(
         ...(newClient ? [["POST", "/api/clients", { id: newClient.id, ...clientVersServeur(newClient) }]] : []),
-        ["POST", "/api/ventes", { id: venteId, commande_id: cmdId, client_id: cl.id, pack_id: pack.id, quantite: qte, adresse_livraison: adresseComplete || cl.ville || "", frais_livraison: montantFrais, livraison, type_vente: b2b ? "b2b" : "b2c", ...paiementVersServeur(pay, total) }],
+        ["POST", "/api/ventes", { id: venteId, commande_id: cmdId, client_id: cl.id, pack_id: pack.id, lignes: lignesPanier.map((l, i) => ({ id: ids[i], pack_id: l.pack.id, quantite: l.qte })), adresse_livraison: adresseComplete || cl.ville || "", frais_livraison: montantFrais, livraison, type_vente: b2b ? "b2b" : "b2c", ...paiementVersServeur(pay, total) }],
       );
       setSaving(false); setApercu(false);
       if (!res) return; // erreur déjà signalée, données rechargées depuis le serveur
@@ -1869,7 +1876,7 @@ function SaleModal({ open, preset, onClose }) {
           </section>
 
           <section>
-            <div className="sale-step-title"><span className={cx("n", pack && "ok")}>{pack ? <Check size={13} strokeWidth={3} /> : 2}</span>Article</div>
+            <div className="sale-step-title"><span className={cx("n", pack && "ok")}>{pack ? <Check size={13} strokeWidth={3} /> : 2}</span>Articles <span className="subtle" style={{ fontWeight: 400 }}>· touchez plusieurs articles pour les ajouter</span></div>
             {categories.length > 0 && (
               <div className="chips" style={{ marginBottom: 10 }}>
                 <button type="button" className={cx("chip", !cat && "on")} onClick={() => setCat("")}>Tout</button>
@@ -1880,15 +1887,15 @@ function SaleModal({ open, preset, onClose }) {
             {err.pack && <div className="field-error" style={{ marginTop: 8 }}><AlertCircle size={14} />{err.pack}</div>}
             <div className="pick-grid">
               {packs.map((p) => (
-                <button key={p.id} className={cx("pick-tile", packId === p.id && "selected")} disabled={p.stock <= 0} onClick={() => { setPackId(p.id); setErr((e) => ({ ...e, pack: null })); }}>
-                  {packId === p.id && <span className="pick-check"><Check size={12} strokeWidth={3} /></span>}
+                <button key={p.id} className={cx("pick-tile", panier.some((x) => x.packId === p.id) && "selected")} disabled={lotsDispo(p) <= 0} onClick={() => basculerArticle(p)}>
+                  {panier.some((x) => x.packId === p.id) && <span className="pick-check"><Check size={12} strokeWidth={3} /></span>}
                   <Thumb pack={p} />
                   <span className="pt-name">{p.nom}</span>
                   <span className="row" style={{ justifyContent: "space-between", width: "100%", flexWrap: "wrap", gap: 4 }}>
                     <span className="pt-price">{fmt(prixEffectif(p))}</span>
                     {promoActive(p) && <span className="prix-barre">{fmt(p.prix)}</span>}
                   </span>
-                  <span className="subtle">{p.stock <= 0 ? "Rupture de stock" : `${stockCache(p) ? "Disponible" : p.stock + " en stock"}${(p.pieces || 1) > 1 ? ` · lot de ${p.pieces}` : ""}`}</span>
+                  <span className="subtle">{lotsDispo(p) <= 0 ? "Rupture de stock" : stockCache(p) ? `Disponible${(p.pieces || 1) > 1 ? ` · lot de ${p.pieces}` : ""}` : libelleStock(p)}</span>
                 </button>
               ))}
               {packs.length === 0 && <div className="subtle">Aucun article trouvé.</div>}
@@ -1898,22 +1905,24 @@ function SaleModal({ open, preset, onClose }) {
 
         <aside className="sale-summary">
           <div className="strong">Récapitulatif</div>
-          {pack ? (
-            <div className="stack-sm" key={pack.id} style={{ animation: "fadeUp .3s var(--ease-out)" }}>
+          {lignesPanier.length ? lignesPanier.map((l) => (
+            <div className="stack-sm" key={l.pack.id} style={{ animation: "fadeUp .3s var(--ease-out)" }}>
               <div className="row" style={{ gap: 12 }}>
-                <Thumb pack={pack} />
-                <div className="grow"><div className="strong truncate">{pack.nom}</div><div className="subtle num">{fmt(prixU)}{promoActive(pack) && <> <span className="prix-barre">{fmt(pack.prix)}</span></>}</div></div>
-                <Stepper value={qte} onChange={setQte} max={Math.max(1, pack.stock)} />
+                <Thumb pack={l.pack} />
+                <div className="grow"><div className="strong truncate">{l.pack.nom}</div><div className="subtle num">{fmt(l.prixU)}{promoActive(l.pack) && <> <span className="prix-barre">{fmt(l.pack.prix)}</span></>}</div></div>
+                <Stepper value={l.qte} onChange={(q) => changerQte(l.pack.id, q)} max={Math.max(1, Math.min(999, lotsDispo(l.pack)))} />
+                <button type="button" className="icon-btn" aria-label={`Retirer ${l.pack.nom}`} title="Retirer" onClick={() => basculerArticle(l.pack)}><X size={15} /></button>
               </div>
-              {parLot > 1 && <div className="subtle">{qte} lot{qte > 1 ? "s" : ""} de {parLot} = <b>{qte * parLot} articles</b> remis au client</div>}
+              {l.parLot > 1 && <div className="subtle">{l.qte} lot{l.qte > 1 ? "s" : ""} de {l.parLot} = <b>{l.qte * l.parLot} articles</b> remis au client</div>}
             </div>
-          ) : <div className="subtle" style={{ padding: "8px 0" }}>Cliquez sur un article</div>}
+          )) : <div className="subtle" style={{ padding: "8px 0" }}>Touchez un ou plusieurs articles</div>}
+          {lignesPanier.length > 1 && <div className="subtle">{lignesPanier.length} produits · <b>{articlesPanier} articles</b> au total</div>}
 
           <div className="row-between">
             <div><div className="strong">Livraison</div><div className="subtle">{livraison ? "Colis suivi dans Livraisons ; montant sur le ticket" : "Retrait sur place"}</div></div>
             <Switch on={livraison} onChange={basculerLivraison} label="Livraison" />
           </div>
-          {livraison && <Field label="Frais de livraison" help={estAdmin ? null : "Tarif fixé par l'administrateur."}><Input value={estAdmin ? frais : String(fraisBoutique || 0)} onChange={(e) => estAdmin && setFrais(e.target.value.replace(/[^\d]/g, ""))} suffix="FCFA" inputMode="numeric" placeholder="0" disabled={!estAdmin} /></Field>}
+          {livraison && <Field label="Frais de livraison" help="Montant convenu avec le client : il est imprimé sur le ticket."><Input value={frais} onChange={(e) => setFrais(e.target.value.replace(/[^\d]/g, ""))} suffix="FCFA" inputMode="numeric" placeholder="0" /></Field>}
           <div className="row-between">
             <div><div className="strong">Vente à un professionnel (B2B)</div><div className="subtle">Le ticket reste obligatoire</div></div>
             <Switch on={b2b} onChange={setB2b} label="Vente B2B" />
@@ -2073,7 +2082,7 @@ function ProductModal({ open, pack, onClose }) {
             <Input value={f.categorie} onChange={(e) => set("categorie", e.target.value)} placeholder="Ex : Chaussettes" list="categories-produits" />
             <datalist id="categories-produits">{[...new Set(data.packs.map((p) => p.categorie).filter(Boolean))].map((k) => <option key={k} value={k} />)}</datalist>
           </Field>
-          <Field label="Articles par lot" help={Number(f.pieces) > 1 ? `Chaque unité vendue sort ${f.pieces} articles du stock.` : "1 = vendu à l'unité. Pour un lot de 3, saisissez 3."}>
+          <Field label="Articles par lot" help={Number(f.pieces) > 1 ? `Chaque lot vendu sort ${f.pieces} articles du stock (le stock se compte en articles).` : "1 = vendu à l'unité. Pour un lot de 3, saisissez 3."}>
             <Input value={f.pieces} onChange={(e) => set("pieces", e.target.value.replace(/[^\d]/g, ""))} inputMode="numeric" suffix="article(s)" />
           </Field>
         </div>
@@ -2447,7 +2456,7 @@ function PageAccueil() {
    PAGE : Commandes (liste)
    ===================================================================== */
 function PageCommandes({ route }) {
-  const { data, update, sync, go, toast, confirm, openSale } = useApp();
+  const { data, update, sync, go, toast, confirm, openSale, estAdmin } = useApp();
   const [tab, setTab] = useState(route.query.statut || "toutes");
   const [q, setQ] = useState("");
   const [sel, setSel] = useState(() => new Set());
@@ -2524,7 +2533,7 @@ function PageCommandes({ route }) {
                 <Btn size="sm" onClick={() => bulk("confirmee")}>Confirmer</Btn>
                 <Btn size="sm" onClick={() => bulk("expediee")}>Expédier</Btn>
                 <Btn size="sm" onClick={() => bulk("livree")}>Livrer</Btn>
-                <Btn size="sm" variant="critical-plain" onClick={() => bulk("annulee")}>Annuler</Btn>
+                {estAdmin && <Btn size="sm" variant="critical-plain" onClick={() => bulk("annulee")}>Annuler</Btn>}
               </div>
             )}
             <table className="table">
@@ -2553,7 +2562,7 @@ function PageCommandes({ route }) {
                     <td className="right num hide-sm">{c.articles}{c.pieces !== c.articles && <div className="cell-sub">{c.pieces} articles</div>}</td>
                     <td className="right num strong">{fmt(c.total)}{c.frais > 0 && <div className="cell-sub">dont {fmt(c.frais)} livr.</div>}</td>
                     <td className="hide-sm wrap">{c.adresseLivraison || <span className="subtle">Retrait sur place</span>}</td>
-                    <td><StatutBadge statut={c.statut} /><div style={{ marginTop: 3 }}><PaiementBadge c={c} /></div></td>
+                    <td><PaiementBadge c={c} /><div style={{ marginTop: 3 }}><StatutBadge statut={c.statut} /></div></td>
                     <td className="hide-md muted">{relDay(c.vente?.date, c.vente?.heure)}<div className="cell-sub">{c.numeroTicket || c.numero}</div></td>
                   </tr>
                 ))}
@@ -3044,10 +3053,10 @@ function PageCommande({ id }) {
         actions={<>
           <Btn icon={Receipt} onClick={() => setReceipt(true)}>Ticket de caisse</Btn>
           <MoreMenu items={[
-            c.statut === "annulee" && { label: "Rétablir la commande", icon: RotateCcw, onClick: () => setStatut("en_attente") },
-            c.statut !== "annulee" && mode === "api" && estAdmin && { label: "Retour ou échange d'article", icon: RotateCcw, onClick: () => setRetour(true) },
-            c.statut !== "annulee" && { label: "Annuler la commande", icon: XCircle, onClick: cancel },
-            c.statut !== "annulee" && c.statut !== "livree" && { label: c.livraison ? "Passer en retrait sur place" : "Passer en livraison", icon: Truck, onClick: () => { patch(() => ({ livraison: !c.livraison })); sync(["PATCH", `/api/commandes/${c.id}/livraison`, { livraison: !c.livraison }]); } },
+            c.statut === "annulee" && estAdmin && { label: "Rétablir la commande", icon: RotateCcw, onClick: () => setStatut("en_attente") },
+            c.statut !== "annulee" && mode === "api" && { label: "Retour ou échange d'article", icon: RotateCcw, onClick: () => setRetour(true) },
+            c.statut !== "annulee" && estAdmin && { label: "Annuler la commande", icon: XCircle, onClick: cancel },
+            c.statut !== "annulee" && c.statut !== "livree" && estAdmin && { label: c.livraison ? "Passer en retrait sur place" : "Passer en livraison", icon: Truck, onClick: () => { patch(() => ({ livraison: !c.livraison })); sync(["PATCH", `/api/commandes/${c.id}/livraison`, { livraison: !c.livraison }]); } },
             ...(estAdmin ? ["sep", { label: "Supprimer", icon: Trash2, tone: "critical", onClick: remove }] : []),
           ]} />
         </>}
@@ -3279,7 +3288,7 @@ function PageProduits({ route }) {
     { nom: (p) => p.nom, prix: (p) => p.prix, stock: (p) => p.stock, vendus: (p) => vendus.get(p.id) || 0 },
   );
 
-  const valeurStock = data.packs.reduce((s, p) => s + p.stock * p.prix, 0);
+  const valeurStock = data.packs.reduce((s, p) => s + (p.stock / (p.pieces || 1)) * p.prix, 0);
   const adjust = (p, delta) => {
     update((d) => ({ ...d, packs: d.packs.map((x) => (x.id === p.id ? { ...x, stock: Math.max(0, x.stock + delta) } : x)) }));
     sync(["PATCH", `/api/packs/${p.id}/stock`, { delta }]);
@@ -3976,7 +3985,7 @@ function PageTickets({ route }) {
                         <td className="right num">{fmtNum(e.lots)}</td>
                         <td className="right num strong">{fmtNum(e.pieces)}</td>
                         <td className="right num hide-sm">{fmt(e.ca)}</td>
-                        <td className="right num">{p && !stockCache(p) ? <>{p.stock}{parLot > 1 && <span className="subtle"> ({fmtNum(p.stock * parLot)} art.)</span>}</> : "—"}</td>
+                        <td className="right num">{p && !stockCache(p) ? <>{fmtNum(p.stock)} art.{parLot > 1 && <span className="subtle"> ({fmtNum(Math.floor(p.stock / parLot))} lots)</span>}</> : "—"}</td>
                       </tr>
                     );
                   })}
@@ -4441,7 +4450,7 @@ function ReceptionModal({ open, packId, onClose }) {
       footer={<><Btn onClick={onClose}>Annuler</Btn><Btn variant="primary" icon={PackagePlus} onClick={valider}>Enregistrer la réception</Btn></>}>
       <div className="form-grid">
         <Field label="Produit" error={err.packId} className="full">
-          <Select value={f.packId || ""} onChange={(e) => set("packId", e.target.value)}>{packs.map((p) => <option key={p.id} value={p.id}>{p.nom} — {p.stock} en stock</option>)}</Select>
+          <Select value={f.packId || ""} onChange={(e) => set("packId", e.target.value)}>{packs.map((p) => <option key={p.id} value={p.id}>{p.nom} — {p.stock} articles en stock</option>)}</Select>
         </Field>
         <Field label="Quantité reçue" error={err.quantite}><Input value={f.quantite || ""} onChange={(e) => set("quantite", e.target.value.replace(/[^\d]/g, ""))} inputMode="numeric" suffix="unités" placeholder="0" data-autofocus /></Field>
         <Field label="Coût d'achat unitaire" optional help="Met à jour le coût du produit (calcul des marges)."><Input value={f.cout || ""} onChange={(e) => set("cout", e.target.value.replace(/[^\d]/g, ""))} inputMode="numeric" suffix="FCFA" placeholder="0" /></Field>
@@ -4473,7 +4482,7 @@ function SortieModal({ open, packId, onClose }) {
     <Modal open={open} onClose={onClose} title="Sortie de stock" size="md"
       footer={<><Btn onClick={onClose}>Annuler</Btn><Btn variant="critical" icon={PackageMinus} onClick={valider}>Retirer du stock</Btn></>}>
       <div className="form-grid">
-        <Field label="Produit" className="full"><Select value={f.packId || ""} onChange={(e) => setF({ ...f, packId: e.target.value })}>{data.packs.map((p) => <option key={p.id} value={p.id}>{p.nom} — {p.stock} en stock</option>)}</Select></Field>
+        <Field label="Produit" className="full"><Select value={f.packId || ""} onChange={(e) => setF({ ...f, packId: e.target.value })}>{data.packs.map((p) => <option key={p.id} value={p.id}>{p.nom} — {p.stock} articles en stock</option>)}</Select></Field>
         <Field label="Quantité" error={err}><Input value={f.quantite || ""} onChange={(e) => { setF({ ...f, quantite: e.target.value.replace(/[^\d]/g, "") }); setErr(""); }} inputMode="numeric" suffix="unités" placeholder="0" data-autofocus /></Field>
         <Field label="Motif"><Select value={f.motif || "casse"} onChange={(e) => setF({ ...f, motif: e.target.value })}><option value="casse">Casse / perte / vol</option><option value="ajustement">Ajustement (usage interne, cadeau…)</option></Select></Field>
         <Field label="Commentaire" optional className="full"><Input value={f.note || ""} onChange={(e) => setF({ ...f, note: e.target.value })} placeholder="Ex : carton abîmé à la livraison" /></Field>
@@ -4549,13 +4558,14 @@ function PageStocks({ route }) {
   const filtres = { tous: () => true, alerte: (p) => p.stock > 0 && p.stock <= seuilDe(p), rupture: (p) => p.stock <= 0, brouillons: (p) => p.actif === false };
   const rows = data.packs.filter((p) => filtres[tab](p) && norm(p.nom + " " + p.sku).includes(norm(q))).sort((a, b) => (a.stock - seuilDe(a)) - (b.stock - seuilDe(b)));
   const unites = data.packs.reduce((s, p) => s + p.stock, 0);
-  const valeurAchat = data.packs.reduce((s, p) => s + p.stock * (p.cout || 0), 0);
-  const valeurVente = data.packs.reduce((s, p) => s + p.stock * prixEffectif(p), 0);
+  // Prix et coût sont ceux d'un lot ; le stock est en articles
+  const valeurAchat = Math.round(data.packs.reduce((s, p) => s + (p.stock / (p.pieces || 1)) * (p.cout || 0), 0));
+  const valeurVente = Math.round(data.packs.reduce((s, p) => s + (p.stock / (p.pieces || 1)) * prixEffectif(p), 0));
   const alertes = data.packs.filter((p) => p.actif !== false && p.stock <= seuilDe(p)).length;
   const couverture = (p) => { const v = vendus30.get(p.id) || 0; return v ? Math.floor(p.stock / (v / 30)) : null; };
 
   const kpis = [
-    { label: "Unités en stock", value: unites, f: fmtNum, icon: Boxes, tint: 4 },
+    { label: "Articles en stock", value: unites, f: fmtNum, icon: Boxes, tint: 4 },
     { label: "Valeur au prix d'achat", value: valeurAchat, f: fmt, icon: Wallet, tint: 3 },
     { label: "Valeur au prix de vente", value: valeurVente, f: fmt, icon: TrendingUp, tint: 0 },
     { label: "Produits en alerte", value: alertes, f: fmtNum, icon: AlertTriangle, tint: alertes ? 3 : 0, color: alertes ? "var(--critical-solid)" : undefined },
@@ -4598,11 +4608,11 @@ function PageStocks({ route }) {
                   return (
                     <tr key={p.id} style={{ "--i": i }}>
                       <td className="wrap"><div className="cell-product"><Thumb pack={p} size="sm" /><div><div className="cell-main">{p.nom}</div><div className="cell-sub">{p.sku}{p.actif === false ? " · brouillon" : ""}</div></div></div></td>
-                      <td><StockBadge stock={p.stock} seuil={seuilDe(p)} />{(p.pieces || 1) > 1 && <div className="cell-sub">lot de {p.pieces} = {fmtNum(p.stock * p.pieces)} articles</div>}</td>
+                      <td><StockBadge stock={p.stock} seuil={seuilDe(p)} />{(p.pieces || 1) > 1 && <div className="cell-sub">soit {fmtNum(lotsDispo(p))} lot{lotsDispo(p) > 1 ? "s" : ""} de {p.pieces}</div>}</td>
                       <td className="hide-sm right num muted">{seuilDe(p)}</td>
                       <td className="hide-sm right num">{vendus30.get(p.id) || 0}</td>
                       <td className="hide-md right num">{c == null ? <span className="subtle">—</span> : <span style={{ color: c < 7 ? "var(--critical-solid)" : undefined }}>{c} j</span>}</td>
-                      <td className="hide-md right num">{p.cout != null ? fmt(p.stock * p.cout) : <span className="subtle">coût ?</span>}</td>
+                      <td className="hide-md right num">{p.cout != null ? fmt(Math.round((p.stock / (p.pieces || 1)) * p.cout)) : <span className="subtle">coût ?</span>}</td>
                       <td className="right"><span className="row" style={{ gap: 2, justifyContent: "flex-end" }}>
                         <button className="icon-btn" title="Réception" aria-label={`Réceptionner ${p.nom}`} onClick={() => setModal({ type: "reception", packId: p.id })}><PackagePlus size={15} /></button>
                         <button className="icon-btn" title="Sortie" aria-label={`Sortie de ${p.nom}`} onClick={() => setModal({ type: "sortie", packId: p.id })}><PackageMinus size={15} /></button>
@@ -5348,17 +5358,17 @@ function PageParametres() {
             {estAdmin && <Btn variant="primary" disabled={!boutique.nom.trim() || !boutiqueModifiee} onClick={enregistrerBoutique}>Enregistrer</Btn>}
           </div>
         </Card>
-        {enLigne && <CarteBoutiqueEnLigne estAdmin={estAdmin} />}
+        {enLigne && estAdmin && <CarteBoutiqueEnLigne estAdmin={estAdmin} />}
         <Card title="Apparence" padded={false}>
           <Row title="Thème" sub="Le mode système suit le réglage de votre appareil.">
             <Segmented value={settings.theme} onChange={(theme) => setSettings({ ...settings, theme })} options={[{ value: "systeme", label: "Système", icon: Monitor }, { value: "clair", label: "Clair", icon: Sun }, { value: "sombre", label: "Sombre", icon: Moon }]} />
           </Row>
         </Card>
-        <Card title="Connexion" padded={false}>
+        {estAdmin && <Card title="Connexion" padded={false}>
           <Row title={enLigne ? "Connecté au serveur" : "Mode démo (hors ligne)"} sub={enLigne ? `API : ${API_BASE || location.origin} · base de données partagée entre vos appareils` : "Les données restent dans ce navigateur. Démarrez le serveur (dossier backend) pour les partager."}>
             {enLigne ? <Badge tone="success" dot>En ligne</Badge> : <Btn icon={RotateCcw} onClick={() => window.location.reload()}>Rechercher le serveur</Btn>}
           </Row>
-        </Card>
+        </Card>}
         {enLigne && estAdmin && (
           <Card title="Équipe" padded={false}>
             <Row title="Vendeurs" sub="Créez les comptes de vos vendeurs et suivez leurs ventes."><Btn icon={UserCheck} onClick={() => go("vendeurs")}>Gérer mes vendeurs</Btn><Btn icon={UserPlus} onClick={() => setEquipeOpen(true)}>Ajouter</Btn></Row>

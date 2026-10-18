@@ -28,7 +28,7 @@ const { lignesCommande, totalCommande, changerStatut, enregistrerPaiement, ticke
 const cinetpay = require("../lib/cinetpay");
 const { envoyerEmail } = require("../lib/email");
 const { ticketEmail } = require("../lib/ticketEmail");
-const { mouvement } = require("../lib/stock");
+const { mouvementLots, lotsDisponibles } = require("../lib/stock");
 const { genererTicket, journaliser } = require("../lib/tickets");
 const { prixEffectif, promoActive, remisePourcent } = require("../lib/prix");
 const diagnostic = require("../lib/diagnostic");
@@ -96,7 +96,7 @@ function produitsPublics() {
     prix: prixEffectif(p), prix_normal: promoActive(p) ? p.prix : null, remise: remisePourcent(p), promo_fin: promoActive(p) ? p.promo_fin : null,
     contenu: String(p.contenu || "").split(/\r?\n/).map((x) => x.trim()).filter(Boolean),
     categorie: p.categorie || null, pieces_par_lot: Math.max(1, Number(p.pieces_par_lot) || 1),
-    stock: Math.max(0, p.stock), disponible: p.stock > 0, ventes: vendus.get(p.id) || 0, cree_le: versIso(p.cree_le),
+    stock: lotsDisponibles(p), disponible: lotsDisponibles(p) > 0, ventes: vendus.get(p.id) || 0, cree_le: versIso(p.cree_le),
   }));
 }
 
@@ -245,7 +245,7 @@ router.post("/commandes", limiteCommandes, espacePublic, async (req, res) => {
   for (const [packId, q] of qtes) {
     const p = db.prepare("SELECT * FROM packs WHERE id = ? AND supprime = 0 AND actif = 1").get(packId);
     if (!p) { indisponibles.push({ pack_id: packId, nom: "Produit retiré", disponible: 0 }); continue; }
-    if (p.stock < q) { indisponibles.push({ pack_id: p.id, nom: p.nom, disponible: Math.max(0, p.stock) }); continue; }
+    if (lotsDisponibles(p) < q) { indisponibles.push({ pack_id: p.id, nom: p.nom, disponible: lotsDisponibles(p) }); continue; }
     lignes.push({ pack: p, quantite: q });
   }
   if (indisponibles.length) {
@@ -303,7 +303,7 @@ router.post("/commandes", limiteCommandes, espacePublic, async (req, res) => {
       );
       for (const l of lignes) {
         // Décrément conditionnel : protège contre deux commandes simultanées sur le dernier article
-        if (!mouvement(l.pack.id, -l.quantite, "vente_en_ligne", { reference: numero, conditionnel: true })) throw Object.assign(new Error("stock"), { stock: l.pack });
+        if (!mouvementLots(l.pack.id, -l.quantite, "vente_en_ligne", { reference: numero, conditionnel: true })) throw Object.assign(new Error("stock"), { stock: l.pack });
         const id = nanoid();
         venteIds.push(id);
         insVente.run(id, commandeId, clientId, l.pack.id, vendeurId, l.quantite, l.prix, champsPaiement.mode, champsPaiement.statut,

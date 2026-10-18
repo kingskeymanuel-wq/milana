@@ -1,7 +1,7 @@
 const express = require("express");
 const { nanoid } = require("nanoid");
 const { validerPaiement } = require("../lib/paiements");
-const { mouvement } = require("../lib/stock");
+const { mouvement, mouvementLots, lotsDisponibles } = require("../lib/stock");
 const { prixEffectif } = require("../lib/prix");
 const db = require("../db");
 const { genererTicket } = require("../lib/tickets");
@@ -50,42 +50,53 @@ router.get("/:id", (req, res) => {
 // { id?, commande_id?, client_id, pack_id, quantite, adresse_livraison?, frais_livraison?, type_vente? (b2c | b2b),
 //   mode_paiement, montant_recu? (espèces), telephone_paiement? (Mobile Money), reference_paiement? }
 router.post("/", (req, res) => {
-  const { client_id, pack_id, quantite, adresse_livraison } = req.body;
-  if (!client_id || !pack_id) {
-    return res.status(400).json({ erreur: "client_id et pack_id sont requis" });
+  const { client_id, adresse_livraison } = req.body;
+  // Plusieurs produits : lignes [{ id?, pack_id, quantite }] ; ancien format : pack_id + quantite
+  const demandees = Array.isArray(req.body.lignes) && req.body.lignes.length ? req.body.lignes.slice(0, 50) : [{ id: req.body.id, pack_id: req.body.pack_id, quantite: req.body.quantite }];
+  if (!client_id || demandees.some((l) => !l.pack_id)) {
+    return res.status(400).json({ erreur: "client_id et au moins un article sont requis" });
   }
   const client = db.prepare("SELECT * FROM clients WHERE id = ? AND supprime = 0").get(client_id);
-  const pack = db.prepare("SELECT * FROM packs WHERE id = ? AND supprime = 0").get(pack_id);
   if (!client) return res.status(404).json({ erreur: "Client introuvable" });
-  if (!pack) return res.status(404).json({ erreur: "Pack introuvable" });
-
-  const qte = Math.max(1, Math.round(Number(quantite) || 1));
-  if (pack.stock < qte) {
-    return res.status(409).json({ erreur: `Stock insuffisant pour ${pack.nom} (disponible : ${pack.stock})` });
+  const lignes = [], lotsParPack = new Map();
+  for (const l of demandees) {
+    const p = db.prepare("SELECT * FROM packs WHERE id = ? AND supprime = 0").get(l.pack_id);
+    if (!p) return res.status(404).json({ erreur: "Article introuvable" });
+    const q = Math.max(1, Math.round(Number(l.quantite) || 1));
+    lotsParPack.set(p.id, (lotsParPack.get(p.id) || 0) + q);
+    // Le prix vient toujours du catalogue (prix promotionnel si une promotion est en cours)
+    lignes.push({ id: l.id, pack: p, qte: q, prix: prixEffectif(p) });
   }
-  const prix = prixEffectif(pack); // prix promotionnel si une promotion est en cours
+  for (const [id, lots] of lotsParPack) {
+    const p = lignes.find((l) => l.pack.id === id).pack;
+    if (lotsDisponibles(p) < lots) return res.status(409).json({ erreur: `Stock insuffisant pour ${p.nom} (disponible : ${lotsDisponibles(p)})` });
+  }
+  const sousTotal = lignes.reduce((s, l) => s + l.qte * l.prix, 0);
   // Seul l'administrateur fixe un montant : pour un vendeur, les frais de livraison sont ceux réglés
   // dans les paramètres de la boutique, quel que soit le montant envoyé. Le prix vient toujours du catalogue.
-  const frais = req.user?.role === "admin"
-    ? Math.max(0, Math.round(Number(req.body.frais_livraison) || 0))
-    : req.body.livraison === true || Number(req.body.frais_livraison) > 0 ? Math.max(0, Math.round(Number(lireBoutique().frais_livraison) || 0)) : 0;
+  const frais = req.body.frais_livraison === undefined || req.body.frais_livraison === null || req.body.frais_livraison === ""
+    ? (req.body.livraison === true ? Math.max(0, Math.round(Number(lireBoutique().frais_livraison) || 0)) : 0)
+    : Math.max(0, Math.round(Number(req.body.frais_livraison) || 0));
   if (frais > 1000000) return res.status(400).json({ erreur: "Frais de livraison invalides" });
   const typeVente = req.body.type_vente === "b2b" ? "b2b" : "b2c";
-  const paiement = validerPaiement(req.body, qte * prix + frais);
+  const paiement = validerPaiement(req.body, sousTotal + frais);
   if (paiement.erreur) return res.status(400).json({ erreur: paiement.erreur });
 
-  const venteId = idOuNouveau(req.body.id);
+  for (const l of lignes) l.venteId = idOuNouveau(l.id);
+  const venteId = lignes[0].venteId;
   const commandeId = idOuNouveau(req.body.commande_id);
-  if (db.prepare("SELECT id FROM ventes WHERE id = ?").get(venteId)) return res.status(409).json({ erreur: "Identifiant déjà utilisé" });
+  if (lignes.some((l) => db.prepare("SELECT id FROM ventes WHERE id = ?").get(l.venteId)) || new Set(lignes.map((l) => l.venteId)).size !== lignes.length) return res.status(409).json({ erreur: "Identifiant déjà utilisé" });
 
   db.transaction(() => {
     const maintenant = new Date().toISOString();
     const numero = prochainNumero();
-    db.prepare(
+    const insVente = db.prepare(
       `INSERT INTO ventes (id, commande_id, client_id, pack_id, vendeur_id, quantite, prix_unitaire, mode_paiement, statut_paiement,
          montant_recu, reference_paiement, telephone_paiement, paye_le, date_vente) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(
-      venteId, commandeId, client_id, pack_id, req.user?.id || null, qte, prix, paiement.mode, paiement.statut,
+    );
+    // Le paiement concerne toute la commande : il est recopié sur chaque ligne (comme pour les commandes en ligne)
+    for (const l of lignes) insVente.run(
+      l.venteId, commandeId, client_id, l.pack.id, req.user?.id || null, l.qte, l.prix, paiement.mode, paiement.statut,
       paiement.montant_recu, paiement.reference, paiement.telephone, paiement.statut === "payee" ? maintenant : null, maintenant
     );
 
@@ -96,7 +107,7 @@ router.post("/", (req, res) => {
     ).run(commandeId, venteId, numero, adresse_livraison ?? client.ville ?? "", nanoid(24), frais, typeVente, client.telephone || null,
       req.body.livraison === true || frais > 0 ? 1 : 0, maintenant); // livraison : colis à livrer (sinon retrait sur place)
     genererTicket(commandeId, req.user?.id, maintenant);
-    mouvement(pack_id, -qte, "vente", { reference: numero, auteurId: req.user?.id });
+    for (const l of lignes) mouvementLots(l.pack.id, -l.qte, "vente", { reference: numero, auteurId: req.user?.id });
     ajouterEvenement(commandeId, { statut: "en_attente", auteurId: req.user?.id, date: maintenant });
   })();
 
@@ -110,7 +121,7 @@ router.delete("/:id", adminOnly, (req, res) => {
   if (!vente) return res.status(404).json({ erreur: "Vente introuvable" });
   const cmd = db.prepare("SELECT * FROM commandes WHERE id = ? OR vente_id = ?").get(vente.commande_id, vente.id);
   db.transaction(() => {
-    if (cmd?.statut !== "annulee") mouvement(vente.pack_id, vente.quantite, "suppression", { reference: cmd?.numero, auteurId: req.user?.id });
+    if (cmd?.statut !== "annulee") mouvementLots(vente.pack_id, vente.quantite, "suppression", { reference: cmd?.numero, auteurId: req.user?.id });
     if (cmd && cmd.vente_id === vente.id) {
       const autre = db.prepare("SELECT id FROM ventes WHERE commande_id = ? AND id <> ? LIMIT 1").get(cmd.id, vente.id);
       if (autre) db.prepare("UPDATE commandes SET vente_id = ? WHERE id = ?").run(autre.id, cmd.id);

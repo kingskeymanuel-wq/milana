@@ -4,3 +4,6 @@ backend/db/*.db
 backend/db/*.db-*
 backend/db/*-espaces/
 backend/uploads/
+
+# Interfaces préparées pour le navigateur (npm run construire)
+*.min.js

@@ -38,4 +38,11 @@ function mouvement(packId, delta, motif, { note = null, reference = null, auteur
   return true;
 }
 
-module.exports = { mouvement, MOTIFS };
+/** Articles par lot d'un produit (1 = vendu à l'unité). */
+const parLot = (packOuId) => { const p = typeof packOuId === "object" && packOuId ? packOuId : db.prepare("SELECT pieces_par_lot FROM packs WHERE id = ?").get(packOuId); return Math.max(1, Number(p?.pieces_par_lot) || 1); };
+/** Mouvement exprimé en lots vendus : le stock (compté en articles) bouge de lots × articles par lot. */
+const mouvementLots = (packId, lots, motif, options) => mouvement(packId, Math.round(Number(lots) || 0) * parLot(packId), motif, options);
+/** Nombre de lots encore vendables (stock en articles). */
+const lotsDisponibles = (pack) => Math.floor(Math.max(0, Number(pack?.stock) || 0) / parLot(pack));
+
+module.exports = { mouvement, mouvementLots, parLot, lotsDisponibles, MOTIFS };

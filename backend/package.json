@@ -5,19 +5,25 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js"
+    "construire": "node construire.js",
+    "postinstall": "node construire.js",
+    "dev": "node construire.js --surveiller"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
     "better-sqlite3": "^12.11.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
+    "esbuild": "^0.28.2",
     "express": "^4.19.2",
     "express-rate-limit": "^7.4.0",
     "helmet": "^7.1.0",
     "jsonwebtoken": "^9.0.2",
+    "lucide-react": "^0.383.0",
     "nanoid": "^3.3.7",
-    "nodemailer": "^10.1.0"
+    "nodemailer": "^10.1.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
   },
   "engines": {
     "node": ">=20 <25"

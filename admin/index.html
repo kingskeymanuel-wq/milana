@@ -25,24 +25,11 @@
     })();
   </script>
 
-  <!-- React, ReactDOM et icônes via CDN (aucune installation nécessaire) -->
-  <script type="importmap">
-  {
-    "imports": {
-      "react": "https://esm.sh/react@18.3.1",
-      "react-dom": "https://esm.sh/react-dom@18.3.1",
-      "react-dom/client": "https://esm.sh/react-dom@18.3.1/client",
-      "lucide-react": "https://esm.sh/lucide-react@0.383.0?external=react"
-    }
-  }
-  </script>
-
-  <!-- Babel permet d'exécuter le JSX directement dans le navigateur -->
-  <script src="https://unpkg.com/@babel/standalone@7.25.6/babel.min.js"></script>
 </head>
 <body>
   <div id="root"></div>
 
-  <script type="text/babel" data-type="module" data-presets="react" src="app.jsx"></script>
+  <!-- Interface préparée sur le serveur (npm run construire) : React et icônes inclus -->
+  <script type="module" src="app.min.js"></script>
 </body>
 </html>

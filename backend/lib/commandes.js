@@ -5,7 +5,7 @@
 const db = require("../db");
 const { versIso, ajouterEvenement } = require("./outils");
 const { lireBoutique } = require("../routes/parametres");
-const { mouvement } = require("./stock");
+const { mouvementLots } = require("./stock");
 
 function lignesCommande(cmd) {
   const lignes = db.prepare("SELECT * FROM ventes WHERE commande_id = ? ORDER BY date_vente, rowid").all(cmd.id);
@@ -19,7 +19,7 @@ const totalCommande = (cmd, lignes = lignesCommande(cmd)) => sousTotal(lignes) +
 
 /** Remet (sens = +1) ou retire (sens = -1) du stock les articles d'une commande (journalisé). */
 function mouvementStock(lignes, sens, motif, reference = null, auteurId = null) {
-  for (const l of lignes) mouvement(l.pack_id, sens * l.quantite, motif, { reference, auteurId });
+  for (const l of lignes) mouvementLots(l.pack_id, sens * l.quantite, motif, { reference, auteurId });
 }
 
 /**
