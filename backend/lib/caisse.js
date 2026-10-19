@@ -40,7 +40,8 @@ function encaissements() {
   const sortie = [];
   for (const [k, ls] of parCommande) {
     const l0 = ls[0];
-    const montant = entier(l0.montant_paye);
+    // Les frais de livraison reviennent à l'entreprise de livraison : seule la part des produits est à la boutique
+    const montant = Math.max(0, entier(l0.montant_paye - (Number(l0.frais_livraison) || 0)));
     const payeLe = ls.map((l) => l.paye_le || l.date_vente).sort().pop();
     const mode = l0.mode_paiement;
     const especes = ESPECES.has(mode);
@@ -65,7 +66,7 @@ const remises = (filtre = "", ...p) => db.prepare(`SELECT * FROM caisse_remises 
 function detenteurs(liste = encaissements()) {
   const users = utilisateurs(), livs = livreurs(), m = new Map();
   const cle = (type, id) => type + ":" + id;
-  const obtenir = (type, id, nom) => { const k = cle(type, id); if (!m.has(k)) m.set(k, { type, id, nom, encaisse: 0, especes: 0, mobile: 0, remis: 0, retours: 0, n: 0, dernier: null }); return m.get(k); };
+  const obtenir = (type, id, nom) => { const k = cle(type, id); if (!m.has(k)) m.set(k, { type, id, nom, encaisse: 0, especes: 0, mobile: 0, remis: 0, retours: 0, depenses: 0, n: 0, dernier: null }); return m.get(k); };
   for (const e of liste) {
     if (e.detenteur.type !== "vendeur" && e.detenteur.type !== "livreur") continue;
     const o = obtenir(e.detenteur.type, e.detenteur.id, e.detenteur.nom);
@@ -73,11 +74,14 @@ function detenteurs(liste = encaissements()) {
     if (!o.dernier || e.date > o.dernier) o.dernier = e.date;
   }
   for (const e of effets().filter((x) => x.detenteur.type === "vendeur")) obtenir("vendeur", e.detenteur.id, e.detenteur.nom).retours += e.valeur;
+  // Dépenses payées en espèces par un vendeur : prises sur l'argent qu'il détient
+  for (const d of db.prepare("SELECT d.montant, d.auteur_id, u.nom FROM depenses d JOIN utilisateurs u ON u.id = d.auteur_id WHERE u.role = 'vendeur' AND COALESCE(d.moyen, 'Espèces') = 'Espèces'").all())
+    obtenir("vendeur", d.auteur_id, d.nom).depenses += d.montant;
   for (const r of remises()) {
     const nom = r.de_type === "livreur" ? livs.get(r.de_id)?.nom : users.get(r.de_id)?.nom;
     obtenir(r.de_type, r.de_id, nom || "Inconnu").remis += r.montant;
   }
-  return [...m.values()].map((o) => ({ ...o, detenu: o.encaisse + o.retours - o.remis })).sort((a, b) => b.detenu - a.detenu);
+  return [...m.values()].map((o) => ({ ...o, detenu: o.encaisse + o.retours - o.remis - o.depenses })).sort((a, b) => b.detenu - a.detenu);
 }
 
 /* ---------- Retours, échanges, annulations : argent à rembourser ou à encaisser ---------- */
@@ -144,7 +148,8 @@ function journee(jour) {
   const especesCaisse = duJour.filter((e) => e.detenteur.type === "caisse").reduce((s, e) => s + e.montant, 0);
   const remisesJour = remises("WHERE jour = ?", jour);
   const remisesEspeces = remisesJour.filter((r) => r.moyen === "Espèces").reduce((s, r) => s + r.montant, 0);
-  const depenses = db.prepare("SELECT d.*, u.nom AS auteur FROM depenses d LEFT JOIN utilisateurs u ON u.id = d.auteur_id WHERE d.date_depense = ? ORDER BY d.cree_le").all(jour);
+  // Dépenses sorties de la caisse de la boutique (celles des vendeurs sont prises sur l'argent qu'ils détiennent)
+  const depenses = db.prepare("SELECT d.*, u.nom AS auteur FROM depenses d LEFT JOIN utilisateurs u ON u.id = d.auteur_id WHERE d.date_depense = ? AND COALESCE(u.role, 'admin') <> 'vendeur' ORDER BY d.cree_le").all(jour);
   const depensesEspeces = depenses.filter((d) => (d.moyen || "Espèces") === "Espèces").reduce((s, d) => s + d.montant, 0);
   const effetsJour = effets().filter((x) => x.jour === jour);
   const retoursEspeces = effetsJour.filter((x) => x.detenteur.type === "caisse").reduce((s, x) => s + x.valeur, 0);
@@ -219,7 +224,7 @@ function annulerRemise(id) {
 /** Pour un vendeur : ce qu'il a encaissé, remis, et ce qu'il détient encore. */
 function situationVendeur(userId) {
   const d = detenteurs().find((o) => o.type === "vendeur" && o.id === userId);
-  return { encaisse: d?.encaisse || 0, especes: d?.especes || 0, mobile: d?.mobile || 0, remis: d?.remis || 0, detenu: d?.detenu || 0,
+  return { encaisse: d?.encaisse || 0, especes: d?.especes || 0, mobile: d?.mobile || 0, remis: d?.remis || 0, depenses: d?.depenses || 0, detenu: d?.detenu || 0,
     remises: remises("WHERE de_type = 'vendeur' AND de_id = ?", userId).slice(0, 10).map((r) => ({ montant: r.montant, moyen: r.moyen, cree_le: r.cree_le })) };
 }
 

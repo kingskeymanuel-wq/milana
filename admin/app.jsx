@@ -1201,7 +1201,7 @@ const NAV = [
   { key: "clients", label: "Clients", icon: Users },
   { key: "diagnostics", label: "Diagnostics", icon: Sparkles, admin: true },
   { key: "formations", label: "Formations", icon: FileText, admin: true },
-  { key: "depenses", label: "Dépenses", icon: Wallet, admin: true },
+  { key: "depenses", label: "Dépenses", icon: Wallet },
   { key: "ventes", label: "Ventes", icon: Receipt },
   { key: "tickets", label: "Tickets de caisse", icon: FileText, badge: (d) => d.commandes.filter((c) => c.statut !== "annulee" && !c.ticketRemisLe).length },
   { key: "vendeurs", label: "Vendeurs", icon: UserCheck, admin: true },
@@ -2622,7 +2622,9 @@ function PageCommandes({ route }) {
 /* =====================================================================
    PAGE : Dépenses (saisies par le vendeur ou l'administrateur)
    ===================================================================== */
-const CATEGORIES_DEPENSE = ["Transport", "Livraison", "Emballage", "Communication", "Repas", "Loyer", "Salaires", "Électricité et eau", "Abonnements", "Autre"];
+const ACHAT_MARCHANDISE = "Achat de marchandise"; // achat de stock : hors bénéfice (le coût des marchandises vendues y est déjà)
+const CATEGORIES_DEPENSE = ["Transport", "Livraison", "Emballage", "Communication", "Repas", ACHAT_MARCHANDISE, "Loyer", "Salaires", "Électricité et eau", "Abonnements", "Autre"];
+const CATEGORIES_DEPENSE_VENDEUR = CATEGORIES_DEPENSE.filter((c) => ![ACHAT_MARCHANDISE, "Loyer", "Salaires"].includes(c));
 /* =====================================================================
    PAGE : Diagnostics capillaires (administrateur) — bilans reçus depuis la boutique
    ===================================================================== */
@@ -2978,7 +2980,7 @@ function PageDepenses() {
             <Field label="Montant"><Input value={f.montant} onChange={(e) => setF({ ...f, montant: e.target.value.replace(/[^\d]/g, "") })} suffix="FCFA" inputMode="numeric" /></Field>
             <Field label="Date"><Input type="date" value={f.date} max={isoDate(new Date())} onChange={(e) => setF({ ...f, date: e.target.value })} /></Field>
           </div>
-          <Field label="Catégorie"><div className="chips">{CATEGORIES_DEPENSE.map((c) => <button type="button" key={c} className={cx("chip", f.categorie === c && "on")} onClick={() => setF({ ...f, categorie: c })}>{c}</button>)}</div></Field>
+          <Field label="Catégorie"><div className="chips">{(estAdmin ? CATEGORIES_DEPENSE : CATEGORIES_DEPENSE_VENDEUR).map((c) => <button type="button" key={c} className={cx("chip", f.categorie === c && "on")} onClick={() => setF({ ...f, categorie: c })}>{c}</button>)}</div></Field>
           <Field label="Payée en" help="Une dépense payée en espèces sort de la caisse du jour."><div className="chips">{["Espèces", "Mobile Money"].map((m) => <button type="button" key={m} className={cx("chip", f.moyen === m && "on")} onClick={() => setF({ ...f, moyen: m })}>{m}</button>)}</div></Field>
           <Field label="Note" optional><Input value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} /></Field>
         </div>
@@ -5325,7 +5327,7 @@ function CarteARemettre() {
         <span className="todo-icon tint-1" style={{ width: 44, height: 44, borderRadius: 12 }}><Banknote size={20} /></span>
         <div className="grow" style={{ minWidth: 200 }}>
           <div className="strong">{s.detenu > 0 ? "Argent à remettre à la boutique" : "Tout est remis"}</div>
-          <div className="subtle">Encaissé {fmt(s.encaisse)} · déjà remis {fmt(s.remis)}{s.mobile ? ` · dont ${fmt(s.mobile)} reçus sur votre Mobile Money` : ""}</div>
+          <div className="subtle">Encaissé {fmt(s.encaisse)} · déjà remis {fmt(s.remis)}{s.depenses ? ` · dépenses ${fmt(s.depenses)}` : ""}{s.mobile ? ` · dont ${fmt(s.mobile)} reçus sur votre Mobile Money` : ""}</div>
         </div>
         <div className="kpi-value num" style={{ color: s.detenu > 0 ? "var(--warning)" : "var(--success)" }}>{fmt(s.detenu)}</div>
       </div>
@@ -5451,7 +5453,8 @@ function bilanPeriode(data, de, a) {
   const ca = somme(vs, (v) => v.total), livraison = somme(commandes, (c) => c.fraisLivraison);
   const coutMarch = somme(vs, cout);
   const depFixes = somme(depenses.filter((d) => CATEGORIES_FIXES.includes(d.categorie)), (d) => d.montant);
-  const depVariables = somme(depenses.filter((d) => !CATEGORIES_FIXES.includes(d.categorie)), (d) => d.montant);
+  const depVariables = somme(depenses.filter((d) => !CATEGORIES_FIXES.includes(d.categorie) && d.categorie !== ACHAT_MARCHANDISE), (d) => d.montant);
+  const achats = somme(depenses.filter((d) => d.categorie === ACHAT_MARCHANDISE), (d) => d.montant);
   const depParCat = Object.entries(depenses.reduce((m, d) => ({ ...m, [d.categorie]: (m[d.categorie] || 0) + d.montant }), {})).sort((x, y) => y[1] - x[1]);
   const encaisse = somme(vs.filter((v) => v.statutPaiement === "payee"), (v) => v.total);
   const parMoyen = Object.entries(vs.filter((v) => v.statutPaiement === "payee").reduce((m, v) => { const k = infoPaiement(v.paiement).court; return { ...m, [k]: (m[k] || 0) + v.total }; }, {})).sort((x, y) => y[1] - x[1]);
@@ -5462,8 +5465,8 @@ function bilanPeriode(data, de, a) {
   });
   const nbCommandes = new Set(vs.map((v) => v.commandeId || v.id)).size;
   const margeBrute = ca - coutMarch;
-  return { ca, livraison, coutMarch, margeBrute, depFixes, depVariables, depenses: depFixes + depVariables, depParCat, benef: margeBrute + livraison - depFixes - depVariables,
-    encaisse, aEncaisser: ca - encaisse, parMoyen, nbCommandes, panier: nbCommandes ? (ca + livraison) / nbCommandes : 0, sansCout: vs.filter((v) => cout(v) == null).length,
+  return { ca, livraison, coutMarch, margeBrute, depFixes, depVariables, depenses: depFixes + depVariables, depParCat, achats, benef: margeBrute - depFixes - depVariables,
+    encaisse, aEncaisser: ca - encaisse, parMoyen, nbCommandes, panier: nbCommandes ? ca / nbCommandes : 0, sansCout: vs.filter((v) => cout(v) == null).length,
     parVendeur: [...pv.values()].map((o) => ({ ...o, n: o.n.size })).sort((x, y) => y.ventes - x.ventes),
     parProduit: [...pp.values()].sort((x, y) => y.ca - x.ca) };
 }
@@ -5472,12 +5475,12 @@ function bilanPeriode(data, de, a) {
 function calculSeuil(data, fixesSaisies) {
   const T0 = today(), auj = isoDate(T0), mois = auj.slice(0, 7);
   const ref = bilanPeriode(data, isoDate(addDays(T0, -89)), auj); // taux de marge sur 90 jours, plus stable
-  const recettes = ref.ca + ref.livraison;
+  const recettes = ref.ca;
   const taux = recettes > 0 ? (recettes - ref.coutMarch - ref.depVariables) / recettes : null;
   const m = bilanPeriode(data, mois + "-01", auj);
   const fixes = Math.max(Number(fixesSaisies) || 0, m.depFixes);
   const seuil = taux > 0 ? fixes / taux : null;
-  const realise = m.ca + m.livraison;
+  const realise = m.ca;
   const jour = T0.getDate(), jours = new Date(T0.getFullYear(), T0.getMonth() + 1, 0).getDate();
   const projection = jour ? (realise / jour) * jours : 0;
   return { taux, fixes, seuil, realise, reste: seuil != null ? Math.max(0, seuil - realise) : null, panier: ref.panier, projection, mois, jour, jours };
@@ -5538,11 +5541,13 @@ function ContenuRapport({ data, mois, b, prec, seuil, extra }) {
       <h3>Résultat</h3>
       <table><tbody>
         <L label="Chiffre d'affaires (produits)" v={b.ca} w={"mois précédent " + fmt(prec.ca) + evol(b.ca, prec.ca)} />
-        <L label="Frais de livraison facturés" v={b.livraison} />
+
         <L label="Coût des marchandises vendues" v={b.coutMarch} neg />
         <L label="Marge brute" v={b.margeBrute} w={b.ca ? Math.round((b.margeBrute / b.ca) * 100) + " % du CA" : ""} gras />
         <L label="Charges variables (transport, emballage…)" v={b.depVariables} neg />
         <L label="Charges fixes (loyer, salaires…)" v={b.depFixes} neg />
+        <L label="Achats de marchandises (stock, hors bénéfice)" v={b.achats} />
+        <L label="Frais de livraison (reversés au livreur, hors bénéfice)" v={b.livraison} />
         <L label="Bénéfice net" v={b.benef} w={"mois précédent " + fmt(prec.benef)} gras neg={b.benef < 0} />
       </tbody></table>
       {b.sansCout > 0 && <p className="gris">⚠ {b.sansCout} vente(s) sans coût d'achat : le bénéfice est surestimé.</p>}
@@ -5623,7 +5628,8 @@ function PageFinances({ route }) {
     const sansCout = vs.filter((v) => cout(v) == null);
     const coutMarch = somme(vs, cout);
     const depenses = (data.depenses || []).filter((d) => dans(d.date));
-    const totalDepenses = somme(depenses, (d) => d.montant);
+    const achats = somme(depenses.filter((d) => d.categorie === ACHAT_MARCHANDISE), (d) => d.montant);
+    const totalDepenses = somme(depenses.filter((d) => d.categorie !== ACHAT_MARCHANDISE), (d) => d.montant);
     const encaisse = somme(vs.filter((v) => v.statutPaiement === "payee"), (v) => v.total);
     const aEncaisser = somme(vs.filter((v) => v.statutPaiement !== "payee"), (v) => v.total);
     const aVerifier = somme(vs.filter((v) => v.statutPaiement === "a_verifier"), (v) => v.total);
@@ -5643,7 +5649,7 @@ function PageFinances({ route }) {
     const parProduit = new Map();
     vs.forEach((v) => { const o = parProduit.get(v.packId) || { pack: v.pack, qte: 0, ca: 0, cout: 0, inconnu: false }; o.qte += v.qte; o.ca += v.total; const c = cout(v); if (c == null) o.inconnu = true; else o.cout += c; parProduit.set(v.packId, o); });
     const margeBrute = ca - coutMarch;
-    return { nbCommandes: new Set(vs.map((v) => v.commandeId || v.commande?.id || v.id)).size, vs, ca, coutMarch, sansCout, depenses, totalDepenses, encaisse, aEncaisser, aVerifier, livraison, margeBrute, benef: margeBrute + livraison - totalDepenses, encaisseTotal: encaisse + livraisonEncaissee, aEncaisserTotal: aEncaisser + (livraison - livraisonEncaissee),
+    return { nbCommandes: new Set(vs.map((v) => v.commandeId || v.commande?.id || v.id)).size, vs, ca, coutMarch, sansCout, depenses, totalDepenses, encaisse, aEncaisser, aVerifier, livraison, margeBrute, benef: margeBrute - totalDepenses, achats, encaisseTotal: encaisse, aEncaisserTotal: aEncaisser,
       parMoyen: [...parMoyen.values()].sort((a, b) => b.value - a.value), parVendeur: [...parVendeur.values()].sort((a, b) => b.ventes - a.ventes),
       parProduit: [...parProduit.values()].filter((p) => p.pack).sort((a, b) => (b.ca - b.cout) - (a.ca - a.cout)) };
   }, [toutes, data.depenses, data.commandes, bornes]);
@@ -5652,8 +5658,7 @@ function PageFinances({ route }) {
   const invest = data.investissements.reduce((s, i) => s + i.montant, 0);
   const benefTotal = useMemo(() => {
     const ca = toutes.reduce((s, v) => s + v.total, 0), c = toutes.reduce((s, v) => s + (cout(v) || 0), 0);
-    const liv = enrichCommandes(data).filter((x) => x.statut !== "annulee").reduce((s, x) => s + (x.fraisLivraison || 0), 0);
-    return ca + liv - c - (data.depenses || []).reduce((s, d) => s + d.montant, 0);
+    return ca - c - (data.depenses || []).filter((d) => d.categorie !== ACHAT_MARCHANDISE).reduce((s, d) => s + d.montant, 0);
   }, [toutes, data.depenses]);
   const recupere = invest > 0 ? Math.max(0, Math.min(100, (benefTotal / invest) * 100)) : null;
 
@@ -5662,9 +5667,9 @@ function PageFinances({ route }) {
     const key = `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
     const vs = toutes.filter((v) => v.date.startsWith(key));
     const ca = vs.reduce((s, v) => s + v.total, 0);
-    const charges = vs.reduce((s, v) => s + (cout(v) || 0), 0) + (data.depenses || []).filter((x) => x.date.startsWith(key)).reduce((s, x) => s + x.montant, 0);
+    const charges = vs.reduce((s, v) => s + (cout(v) || 0), 0) + (data.depenses || []).filter((x) => x.date.startsWith(key) && x.categorie !== ACHAT_MARCHANDISE).reduce((s, x) => s + x.montant, 0);
     const liv = enrichCommandes(data).filter((x) => x.statut !== "annulee" && x.vente?.date?.startsWith(key)).reduce((s, x) => s + (x.fraisLivraison || 0), 0);
-    return { label: d.toLocaleDateString("fr-FR", { month: "short" }).replace(".", ""), full: d.toLocaleDateString("fr-FR", { month: "long", year: "numeric" }), values: [ca, charges], benef: ca + liv - charges };
+    return { label: d.toLocaleDateString("fr-FR", { month: "short" }).replace(".", ""), full: d.toLocaleDateString("fr-FR", { month: "long", year: "numeric" }), values: [ca, charges], benef: ca - charges };
   }), [toutes, data.depenses]);
 
   const rows = [...data.investissements].sort((a, b) => b.date.localeCompare(a.date));
@@ -5681,21 +5686,21 @@ function PageFinances({ route }) {
     const lignes = [["Date", "Commande", "Produit", "Quantité", "Prix unitaire", "Total", "Coût d'achat", "Marge", "Paiement", "Statut du paiement", "Vendeur"],
       ...r.vs.map((v) => { const c = cout(v); return [v.date, v.commande?.numero || "", v.pack?.nom || "", v.qte, v.prixUnitaire, v.total, c ?? "", c == null ? "" : v.total - c, infoPaiement(v.paiement).court, v.statutPaiement === "payee" ? "Encaissé" : v.statutPaiement === "a_verifier" ? "À vérifier" : "À encaisser", v.vendeur || ""]; }),
       [], ["Dépenses"], ...r.depenses.map((d) => [d.date, "", d.libelle, "", "", -d.montant, "", "", d.categorie, "", d.auteur || ""]),
-      [], ["Chiffre d'affaires", r.ca], ["Coût des marchandises", r.coutMarch], ["Dépenses", r.totalDepenses], ["Frais de livraison facturés", r.livraison], ["Bénéfice net", r.benef], ["Encaissé (livraison comprise)", r.encaisseTotal], ["À encaisser (livraison comprise)", r.aEncaisserTotal]];
+      [], ["Chiffre d'affaires", r.ca], ["Coût des marchandises", r.coutMarch], ["Dépenses", r.totalDepenses], ["Bénéfice net", r.benef], ["Encaissé", r.encaisseTotal], ["À encaisser", r.aEncaisserTotal], ["Achats de marchandises (stock, hors bénéfice)", r.achats], ["Frais de livraison (reversés au livreur, hors bénéfice)", r.livraison]];
     const url = URL.createObjectURL(new Blob(["\ufeff" + lignes.map((l) => l.map(cel).join(";")).join("\r\n")], { type: "text/csv;charset=utf-8" }));
     const a = document.createElement("a"); a.href = url; a.download = `finances-${bornes.de === "0000-00-00" ? "tout" : bornes.de}-${bornes.a === "9999-99-99" ? isoDate(T0) : bornes.a}.csv`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 2000);
   };
 
   const pctCa = (n) => (r.ca ? Math.round((n / r.ca) * 100) + " %" : "—");
   const resultat = [
-    { label: "Chiffre d'affaires", value: r.ca, icon: TrendingUp, tint: 4, sous: `${r.nbCommandes} commande${r.nbCommandes > 1 ? "s" : ""}${r.livraison ? ` + ${fmt(r.livraison)} de livraison` : ""}` },
+    { label: "Chiffre d'affaires", value: r.ca, icon: TrendingUp, tint: 4, sous: `${r.nbCommandes} commande${r.nbCommandes > 1 ? "s" : ""}` },
     { label: "Coût des marchandises", value: r.coutMarch, icon: Package, tint: 7, sous: r.sansCout.length ? `${r.sansCout.length} vente(s) sans coût d'achat` : pctCa(r.coutMarch) + " du CA" },
-    { label: "Dépenses", value: r.totalDepenses, icon: Wallet, tint: 3, sous: `${r.depenses.length} dépense${r.depenses.length > 1 ? "s" : ""}`, aller: () => go("depenses") },
-    { label: "Bénéfice net", value: r.benef, icon: Landmark, tint: r.benef >= 0 ? 0 : 3, color: r.benef >= 0 ? "var(--success-dot)" : "var(--critical-solid)", sous: "CA + livraison − coûts − dépenses" },
+    { label: "Dépenses", value: r.totalDepenses, icon: Wallet, tint: 3, sous: r.achats ? `hors ${fmt(r.achats)} d'achats de marchandises` : `${r.depenses.length} dépense${r.depenses.length > 1 ? "s" : ""}`, aller: () => go("depenses") },
+    { label: "Bénéfice net", value: r.benef, icon: Landmark, tint: r.benef >= 0 ? 0 : 3, color: r.benef >= 0 ? "var(--success-dot)" : "var(--critical-solid)", sous: "CA − coût des marchandises − dépenses" },
   ];
   const tresorerie = [
-    { label: "Encaissé", value: r.encaisseTotal, icon: Banknote, tint: 0, sous: "Argent reçu, livraison comprise" },
-    { label: "À encaisser", value: r.aEncaisserTotal, icon: Clock, tint: 1, sous: r.aVerifier ? `dont ${fmt(r.aVerifier)} de transferts à vérifier` : "Livraison comprise", aller: () => go("ventes", null, { paiement: "en_attente" }) },
+    { label: "Encaissé", value: r.encaisseTotal, icon: Banknote, tint: 0, sous: "Argent reçu pour les produits" },
+    { label: "À encaisser", value: r.aEncaisserTotal, icon: Clock, tint: 1, sous: r.aVerifier ? `dont ${fmt(r.aVerifier)} de transferts à vérifier` : "Produits vendus non encore payés", aller: () => go("ventes", null, { paiement: "en_attente" }) },
     { label: "Marge brute", value: r.margeBrute, icon: Sparkles, tint: 5, sous: pctCa(r.margeBrute) + " du CA" },
     { label: "Capital investi", value: invest, icon: Store, tint: 2, sous: recupere == null ? "Aucun investissement noté" : `${Math.round(recupere)} % déjà récupéré` },
   ];
@@ -5726,7 +5731,7 @@ function PageFinances({ route }) {
 
       <div className="titre-section">Trésorerie</div>
       <div className="kpi-grid">{tresorerie.map((k) => <Kpi key={k.label} k={k} />)}</div>
-      {r.livraison > 0 && <p className="subtle" style={{ margin: "10px 2px 0" }}>Frais de livraison facturés aux clients : <b className="num">{fmt(r.livraison)}</b> : à part du chiffre d'affaires produits, mais comptés dans le bénéfice et la trésorerie.</p>}
+      {(r.livraison > 0 || r.achats > 0) && <p className="subtle" style={{ margin: "10px 2px 0" }}>{r.livraison > 0 && <>Frais de livraison payés par les clients : <b className="num">{fmt(r.livraison)}</b>, encaissés par le livreur, hors bénéfice et hors trésorerie. </>}{r.achats > 0 && <>Achats de marchandises : <b className="num">{fmt(r.achats)}</b>, du stock, hors bénéfice (le coût des produits vendus est déjà déduit).</>}</p>}
 
       <div className="grid-main" style={{ marginTop: 16 }}>
         <Card title="Chiffre d'affaires et charges" sub="6 derniers mois · charges = coût des marchandises + dépenses">

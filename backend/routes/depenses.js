@@ -9,7 +9,8 @@ const { nanoid } = require("nanoid");
 const db = require("../db");
 const router = express.Router();
 
-const CATEGORIES = ["Transport", "Livraison", "Emballage", "Communication", "Repas", "Loyer", "Salaires", "Électricité et eau", "Abonnements", "Autre"];
+const CATEGORIES = ["Transport", "Livraison", "Emballage", "Communication", "Repas", "Achat de marchandise", "Loyer", "Salaires", "Électricité et eau", "Abonnements", "Autre"];
+const RESERVEES_ADMIN = ["Achat de marchandise", "Loyer", "Salaires"]; // un vendeur ne les saisit pas
 const lister = (user) => db.prepare("SELECT d.*, u.nom AS auteur FROM depenses d LEFT JOIN utilisateurs u ON u.id = d.auteur_id ORDER BY d.date_depense DESC, d.cree_le DESC").all()
   .filter((d) => user.role === "admin" || d.auteur_id === user.id);
 
@@ -20,6 +21,7 @@ router.post("/", (req, res) => {
   const montant = Math.round(Number(req.body.montant) || 0);
   if (libelle.length < 2) return res.status(400).json({ erreur: "Indiquez l'objet de la dépense" });
   if (!(montant > 0)) return res.status(400).json({ erreur: "Indiquez le montant de la dépense" });
+  if (req.user.role !== "admin" && RESERVEES_ADMIN.includes(req.body.categorie)) return res.status(403).json({ erreur: "Cette catégorie est réservée à l'administrateur" });
   const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.body.date || "")) ? req.body.date : new Date().toISOString().slice(0, 10);
   const id = nanoid();
   db.prepare("INSERT INTO depenses (id, libelle, categorie, montant, date_depense, note, auteur_id, cree_le, moyen) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")

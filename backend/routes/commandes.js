@@ -72,7 +72,7 @@ function suiviAnnulation(avant, apres, userId) {
   if (apres.statut === "annulee" && avant.statut !== "annulee" && apres.montant_paye != null) {
     // Solde : payé − déjà à rembourser/remboursé (ou avoir) + compléments encaissés ou à encaisser
     const deja = db.prepare("SELECT COALESCE(SUM(CASE WHEN sens = 'rembourser' THEN montant ELSE -montant END), 0) AS n FROM reglements_retour WHERE commande_id = ?").get(apres.id).n;
-    require("../lib/caisse").creerReglement(apres.id, Number(apres.montant_paye) - deja, "Commande annulée", userId);
+    require("../lib/caisse").creerReglement(apres.id, Number(apres.montant_paye) - (Number(apres.frais_livraison) || 0) - deja, "Commande annulée", userId);
   }
   if (avant.statut === "annulee" && apres.statut !== "annulee") db.prepare("DELETE FROM reglements_retour WHERE commande_id = ? AND motif = 'Commande annulée' AND statut = 'a_regler'").run(apres.id);
 }
@@ -303,7 +303,7 @@ router.post("/:id/retour", (req, res) => {
       ajouterEvenement(cmd.id, { type: "statut", statut: "annulee", auteurId: req.user?.id });
       ajouterEvenement(cmd.id, { type: "note", auteurId: req.user?.id, texte: `Retour complet${cmd.statut === "livree" ? " après livraison" : ""} : ${nb} article(s) rendu(s) — ${Math.round(total).toLocaleString("fr-FR").replace(/[\u202f\u00a0]/g, " ")} FCFA à rembourser au client.${remis ? " Articles remis en stock." : " Articles non remis en stock."}${remarque ? " " + remarque : ""}` });
     })();
-    require("../lib/caisse").creerReglement(cmd.id, total + (cmd.statut !== "livree" ? Number(cmd.frais_livraison) || 0 : 0), "Retour complet", req.user?.id);
+    require("../lib/caisse").creerReglement(cmd.id, total, "Retour complet", req.user?.id); // les frais de livraison se règlent avec le livreur
     return res.status(201).json({ commande: enrichir(lire(cmd.id)), difference: total, complet: true });
   }
   const ligne = lignes.find((l) => l.id === req.body.vente_id);
