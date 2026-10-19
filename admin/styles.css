@@ -1683,3 +1683,6 @@ body { background: transparent; }
   .rapport-impression .rapport-tete { border-bottom-color: #B8862B; }
   .rapport-impression h3, .rapport-impression tr { break-inside: avoid; }
 }
+
+/* Livraisons : livreur proposé selon la zone */
+.chip-proposition { display: inline-flex; margin-top: 6px; font-size: 12px; padding: 4px 9px; border-style: dashed; color: var(--brand-strong); background: var(--brand-soft); cursor: pointer; }

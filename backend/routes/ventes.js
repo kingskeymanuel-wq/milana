@@ -113,6 +113,7 @@ router.post("/", (req, res) => {
     ajouterEvenement(commandeId, { statut: "en_attente", auteurId: req.user?.id, date: maintenant });
   })();
   if (paiement.statut === "payee") require("../lib/caisse").marquerCompteVendeur(commandeId, req.user?.id, paiement.mode);
+  require("../lib/zones").attribuer(commandeId); // colis à livrer : livreur de la zone
 
   res.status(201).json(enrichir(db.prepare("SELECT * FROM ventes WHERE id = ?").get(venteId)));
 });

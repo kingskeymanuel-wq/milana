@@ -4147,7 +4147,7 @@ function LivreursModal({ open, onClose }) {
           <div className="form-grid">
             <Field label="Nom"><Input icon={User} value={f.nom} onChange={(e) => setF({ ...f, nom: e.target.value })} placeholder="Ex : Moussa Traoré" /></Field>
             <Field label="Téléphone"><Input icon={Phone} value={f.tel} onChange={(e) => setF({ ...f, tel: e.target.value })} placeholder="05 00 00 00 00" inputMode="tel" /></Field>
-            <Field label="Zone couverte" optional className="full"><Input icon={MapPin} value={f.zone} onChange={(e) => setF({ ...f, zone: e.target.value })} placeholder="Ex : Cocody, Riviera, Bingerville" /></Field>
+            <Field label="Zone couverte" optional className="full" help="Communes ou quartiers séparés par des virgules ou « et » (ex. « Cocody, Bingerville » ou « Abidjan sud et nord »). Les colis de ces zones lui sont attribués automatiquement."><Input icon={MapPin} value={f.zone} onChange={(e) => setF({ ...f, zone: e.target.value })} placeholder="Ex : Cocody, Riviera, Bingerville" /></Field>
           </div>
           {err && <div className="field-error" style={{ marginTop: 8 }}><AlertCircle size={14} />{err}</div>}
           <div className="row" style={{ justifyContent: "flex-end", marginTop: 12 }}>
@@ -4220,6 +4220,60 @@ function EchecLivraisonModal({ cmd, onClose, onValider }) {
     </Modal>
   );
 }
+
+/* =====================================================================
+   Zones de livraison (même logique que le serveur : backend/lib/zones.js)
+   ===================================================================== */
+const SECTEURS_LIVRAISON = {
+  "abidjan sud": ["treichville", "marcory", "koumassi", "port bouet", "bietry", "zone 4", "vridi", "anoumabo", "gonzagueville"],
+  "abidjan nord": ["abobo", "adjame", "attecoube", "cocody", "plateau", "yopougon", "angre", "riviera", "deux plateaux", "2 plateaux", "williamsville", "anyama"],
+  "cocody": ["riviera", "angre", "deux plateaux", "2 plateaux", "palmeraie", "faya", "bonoumin", "blockhauss", "danga", "ambassades"],
+  "yopougon": ["yop", "niangon", "toits rouges", "sicogi", "selmer"],
+  "marcory": ["zone 4", "bietry", "anoumabo", "remblais"],
+  "port bouet": ["vridi", "gonzagueville", "aeroport"],
+  "abobo": ["pk 18", "n dotre", "avocatier"],
+  "plateau": ["centre ville"],
+};
+SECTEURS_LIVRAISON["sud"] = SECTEURS_LIVRAISON["abidjan sud"];
+SECTEURS_LIVRAISON["nord"] = SECTEURS_LIVRAISON["abidjan nord"];
+SECTEURS_LIVRAISON["abidjan"] = [...new Set([...SECTEURS_LIVRAISON["abidjan sud"], ...SECTEURS_LIVRAISON["abidjan nord"], "bingerville", "songon"])];
+SECTEURS_LIVRAISON["grand abidjan"] = SECTEURS_LIVRAISON["abidjan"];
+
+const simpleZone = (s) => String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+
+/** Mots d'une zone : { mot: poids }. */
+function motsZone(zone) {
+  const mots = {};
+  // Découper d'abord (virgules, « et », « ou »…), simplifier ensuite chaque commune
+  const parties = String(zone || "").toLowerCase().split(/[,;/+&\n]|\bet\b|\bou\b/).map((x) => simpleZone(x)).filter((x) => x.length >= 3);
+  for (const p of parties) {
+    mots[p] = Math.max(mots[p] || 0, 2);
+    for (const m of SECTEURS_LIVRAISON[p] || []) mots[m] = Math.max(mots[m] || 0, 1);
+  }
+  return mots;
+}
+
+/** Livreurs actifs dont la zone couvre l'adresse, du plus précis au moins précis. */
+function livreursPour(livreurs, adresse) {
+  const texte = " " + simpleZone(adresse) + " ";
+  return (livreurs || []).filter((l) => l.actif !== false && l.actif !== 0 && l.zone).map((l) => {
+    let score = 0;
+    for (const [m, poids] of Object.entries(motsZone(l.zone))) if (texte.includes(" " + m + " ")) score = Math.max(score, poids * 100 + m.length);
+    return { livreur: l, score };
+  }).filter((x) => x.score > 0).sort((a, b) => b.score - a.score);
+}
+
+/** Le livreur à attribuer : seulement s'il est seul en tête (sinon on laisse choisir). */
+function meilleurLivreur(livreurs, adresse) {
+  const l = livreursPour(livreurs, adresse);
+  if (!l.length || (l[1] && l[1].score === l[0].score)) return null;
+  return l[0].livreur;
+}
+
+/** Communes reconnues d'une zone, pour l'affichage. */
+const communesReconnues = (zone) => Object.keys(motsZone(zone));
+
+
 
 function PageLivraisons() {
   const { data, update, sync, go, toast, estAdmin, openSale } = useApp();
@@ -4313,6 +4367,13 @@ function PageLivraisons() {
       livres: siens.filter((c) => c.statut === "livree" && c.vente.date >= il30).length, encaisser: siens.filter((c) => c.statut !== "livree").reduce((s, c) => s + aEncaisser(c), 0), echecs: siens.reduce((s, c) => s + (c.tentatives || 0), 0) };
   });
 
+  // Zones : livreurs dont la zone couvre l'adresse du colis (adresse + ville du client)
+  const proposition = (c) => livreursPour(livreurs, `${c.adresseLivraison || ""} ${c.client?.ville || ""}`).filter((x, i, t) => x.score === t[0].score).slice(0, 2);
+  const attribuables = nonLivres.filter((c) => !c.livreurId).map((c) => ({ c, l: meilleurLivreur(livreurs, `${c.adresseLivraison || ""} ${c.client?.ville || ""}`) })).filter((x) => x.l);
+  const attribuerSelonZone = () => {
+    for (const { c, l } of attribuables) affecter([c.id], l.id);
+    toast({ title: `${attribuables.length} colis attribué${attribuables.length > 1 ? "s" : ""} selon la zone` });
+  };
   const selection = [...sel];
   const allOnPage = pg.slice.length > 0 && pg.slice.every((c) => sel.has(c.id));
   const toggle = (id, v) => setSel((s) => { const n = new Set(s); v ? n.add(id) : n.delete(id); return n; });
@@ -4336,6 +4397,7 @@ function PageLivraisons() {
         ))}
       </div>
       {livreurs.length === 0 && estAdmin && <div className="banner banner-info" style={{ marginBottom: 16 }}><Info size={16} /><div>Ajoutez vos livreurs pour leur confier des colis et leur envoyer leur feuille de route. <button className="link" onClick={() => setGerer(true)}>Ajouter un livreur</button></div></div>}
+      {attribuables.length > 0 && <div className="banner banner-info" style={{ marginBottom: 16, alignItems: "center" }}><MapPin size={16} /><div className="grow"><b>{attribuables.length} colis sans livreur</b> se trouvent dans la zone d'un de vos livreurs.</div><Btn size="sm" variant="primary" onClick={attribuerSelonZone}>Attribuer selon la zone</Btn></div>}
       {retards > 0 && <div className="banner banner-warning" style={{ marginBottom: 16 }}><AlertTriangle size={16} /><div><b>{retards} colis en retard</b> sur la date de livraison prévue. <button className="link" onClick={() => setTab("retard")}>Voir ces colis</button></div></div>}
 
       <div className="card">
@@ -4388,11 +4450,13 @@ function PageLivraisons() {
                         <div className="cell-sub only-mobile">{resumeCommande(c)} · {nomLivreur(c.livreurId) || "sans livreur"}</div></td>
                       <td className="hide-md wrap">{c.lignes.map((l) => `${l.pack?.nom || "?"} × ${l.qte}`).join(", ")}<div className="cell-sub">{c.pieces} article{c.pieces > 1 ? "s" : ""} · {c.numeroTicket || c.numero}</div></td>
                       <td className="right num strong">{aEncaisser(c) ? fmt(aEncaisser(c)) : <Badge tone="success">Payé</Badge>}{c.frais > 0 && <div className="cell-sub">dont {fmt(c.frais)} livr.</div>}</td>
-                      <td className="hide-sm">{fini ? nomLivreur(c.livreurId) || <span className="subtle">—</span> : (
+                      <td className="hide-sm">{fini ? nomLivreur(c.livreurId) || <span className="subtle">—</span> : (<>
                         <Select value={c.livreurId || ""} onChange={(e) => affecter([c.id], e.target.value)} aria-label="Livreur" style={{ minWidth: 150 }}>
                           <option value="">Sans livreur</option>
                           {livreurs.filter((l) => l.actif || l.id === c.livreurId).map((l) => <option key={l.id} value={l.id}>{l.nom}</option>)}
-                        </Select>)}</td>
+                        </Select>
+                        {!c.livreurId && proposition(c).map(({ livreur: l }) => <button key={l.id} type="button" className="chip chip-proposition" title={`Zone : ${l.zone}`} onClick={() => { affecter([c.id], l.id); toast({ title: `Colis confié à ${l.nom}`, desc: l.zone }); }}>Proposé : {l.nom}</button>)}
+                      </>)}</td>
                       <td className="hide-md">{fini ? (c.livreeLe ? fmtDateCourt(c.livreeLe.slice(0, 10)) : c.livraisonPrevue ? fmtDateCourt(c.livraisonPrevue) : "—") : (
                         <input type="date" className={cx("input date-compacte", enRetard(c) && "retard")} value={c.livraisonPrevue || ""} onChange={(e) => prevoir(c, e.target.value)} aria-label="Date prévue" />)}</td>
                       <td><StatutBadge statut={c.statut} />{enRetard(c) && <div><Badge tone="critical">En retard</Badge></div>}{c.tentatives > 0 && <div><Badge tone="warning">{c.tentatives} échec{c.tentatives > 1 ? "s" : ""}</Badge></div>}</td>
@@ -4413,6 +4477,26 @@ function PageLivraisons() {
         )}
         <Pager pg={pg} />
       </div>
+
+      {livreurs.length > 0 && (
+        <Card title="Zones de livraison" sub="Qui livre où : les colis de ces zones sont attribués automatiquement au bon livreur" padded={false} style={{ marginBottom: 16 }}
+          actions={estAdmin && <Btn size="sm" icon={Pencil} onClick={() => setGerer(true)}>Modifier les zones</Btn>}>
+          <div style={{ height: 8 }} />
+          <div className="list">{livreurs.filter((l) => l.actif).map((l) => {
+            const communes = l.zone ? communesReconnues(l.zone) : [];
+            const enAttente = nonLivres.filter((c) => !c.livreurId && livreursPour([l], `${c.adresseLivraison || ""} ${c.client?.ville || ""}`).length).length;
+            return (
+              <div key={l.id} className="list-item" style={{ alignItems: "flex-start" }}>
+                <Avatar name={l.nom} size="sm" />
+                <div className="grow">
+                  <div className="row-between"><span className="strong">{l.nom}</span>{enAttente > 0 && <Badge tone="info">{enAttente} colis de sa zone sans livreur</Badge>}</div>
+                  {l.zone ? <><div className="subtle">Zone : {l.zone}</div><div className="row" style={{ flexWrap: "wrap", gap: 4, marginTop: 6 }}>{communes.slice(0, 18).map((m) => <span key={m} className="badge">{m}</span>)}{communes.length > 18 && <span className="subtle">+{communes.length - 18}</span>}</div></>
+                    : <div className="subtle" style={{ color: "var(--warning)" }}>Aucune zone indiquée : ses colis ne lui sont pas attribués automatiquement.</div>}
+                </div>
+              </div>);
+          })}</div>
+        </Card>
+      )}
 
       {livreurs.length > 0 && (
         <Card title="Par livreur" sub="Colis confiés, livrés sur 30 jours et argent à rapporter" padded={false}
