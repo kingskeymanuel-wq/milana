@@ -1,0 +1,60 @@
+{
+  "name": "MILANA Care",
+  "short_name": "MILANA",
+  "description": "MILANA Care : diagnostic capillaire gratuit, routine sur mesure et soins livrés chez vous.",
+  "lang": "fr",
+  "dir": "ltr",
+  "start_url": "/?source=application",
+  "scope": "/",
+  "id": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0B0F0D",
+  "theme_color": "#0B0F0D",
+  "categories": [
+    "shopping",
+    "business"
+  ],
+  "icons": [
+    {
+      "src": "/icones/icone-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icones/icone-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icones/icone-masquable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Mon diagnostic",
+      "url": "/#/diagnostic",
+      "icons": [
+        {
+          "src": "/icones/icone-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Mon espace",
+      "url": "/admin/",
+      "icons": [
+        {
+          "src": "/icones/icone-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    }
+  ]
+}

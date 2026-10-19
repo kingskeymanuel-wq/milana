@@ -23,6 +23,10 @@
     })();
   </script>
 
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="/icones/icone-180.png" />
+  <link rel="icon" type="image/png" sizes="192x192" href="/icones/icone-192.png" />
+  <script>if ("serviceWorker" in navigator) addEventListener("load", () => navigator.serviceWorker.register("/sw.js").catch(() => {}));</script>
 </head>
 <body class="vitrine">
   <div id="root"></div>
