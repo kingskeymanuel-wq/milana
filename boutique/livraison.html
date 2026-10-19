@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="fr"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#17110B"><meta name="robots" content="noindex, nofollow">
+<title>Livraison</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+:root { --fond: #F5F1E9; --carte: #FFFCF7; --encre: #241F19; --gris: #625B51; --trait: #E2D9CA; --or: #B8862B; --or-fonce: #6B4B0B; --vert: #1F7A45; --rouge: #A52D3D; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--fond); color: var(--encre); font: 15px/1.45 system-ui, "Segoe UI", Arial, sans-serif; }
+header { background: #17110B; color: #F4EFE6; padding: 14px 16px; padding-top: calc(14px + env(safe-area-inset-top, 0px)); }
+header small { color: #E2B657; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; font-size: 11px; }
+header h1 { margin: 2px 0 0; font-size: 19px; }
+main { padding: 12px 14px 120px; display: grid; gap: 12px; max-width: 640px; margin: 0 auto; }
+.carte { background: var(--carte); border: 1px solid var(--trait); border-radius: 14px; padding: 14px; }
+#carte { height: 300px; border-radius: 14px; border: 1px solid var(--trait); z-index: 0; }
+.etat { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.point { width: 10px; height: 10px; border-radius: 50%; background: var(--gris); flex: none; }
+.point.on { background: var(--vert); box-shadow: 0 0 0 4px rgba(31,122,69,.18); }
+.point.off { background: var(--rouge); }
+.ligne { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--trait); }
+.ligne:last-child { border-bottom: 0; }
+.gris { color: var(--gris); font-size: 13.5px; }
+.montant { font-size: 22px; font-weight: 800; }
+.boutons { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+a.btn, button.btn { display: flex; align-items: center; justify-content: center; min-height: 48px; border-radius: 12px; border: 1px solid var(--trait); background: var(--carte); color: var(--encre); font: 600 15px system-ui, sans-serif; text-decoration: none; padding: 0 12px; cursor: pointer; }
+.btn.or { background: var(--or-fonce); color: #fff; border-color: transparent; }
+.btn.vert { background: var(--vert); color: #fff; border-color: transparent; }
+.btn:disabled { opacity: .5; }
+.barre { position: fixed; left: 0; right: 0; bottom: 0; background: var(--carte); border-top: 1px solid var(--trait); padding: 10px 14px; padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px)); display: grid; gap: 8px; }
+.barre .boutons { margin: 0; }
+input { width: 100%; min-height: 44px; border: 1px solid var(--trait); border-radius: 10px; padding: 0 12px; font: 15px system-ui, sans-serif; background: #fff; }
+.alerte { background: #FBEBC8; color: #664600; border-radius: 10px; padding: 10px 12px; font-size: 14px; }
+.ok { background: #E1F2E7; color: #1F5E3B; border-radius: 10px; padding: 10px 12px; font-size: 14px; }
+.confirmer { display: none; } .confirmer.ouvert { display: grid; }
+[hidden] { display: none !important; }
+</style></head>
+<body>
+<header><small id="boutique">Livraison</small><h1 id="titre">Chargement…</h1></header>
+<main>
+  <div class="carte"><div class="etat"><span class="point" id="point"></span><span id="etat">Localisation en cours…</span></div>
+    <div class="gris" id="aide" style="margin-top:6px">Gardez cette page ouverte pendant la livraison : votre position est partagée avec la boutique.</div></div>
+  <div id="carte"></div>
+  <div class="carte" id="qui" hidden>
+    <b>Qui êtes-vous ?</b> <span class="gris">(facultatif, pour la boutique)</span>
+    <div style="display:grid;gap:8px;margin-top:8px"><input id="nom" placeholder="Votre nom ou votre société de livraison"><input id="tel" inputmode="tel" placeholder="Votre numéro"></div>
+    <button class="btn" id="enregistrer" style="margin-top:8px;width:100%">Enregistrer</button>
+  </div>
+  <div class="carte"><b>Client</b>
+    <div class="ligne"><span id="client">—</span><span class="gris" id="ville"></span></div>
+    <div class="ligne"><span id="adresse">—</span></div>
+    <div class="boutons"><a class="btn" id="appeler">Appeler</a><a class="btn" id="whatsapp" target="_blank" rel="noopener">WhatsApp</a></div>
+    <a class="btn" id="itineraire" target="_blank" rel="noopener" style="margin-top:8px">Itinéraire (Google Maps)</a>
+  </div>
+  <div class="carte"><b>Colis <span id="numero" class="gris"></span></b><div id="articles"></div></div>
+  <div class="carte"><div class="gris">À encaisser auprès du client</div><div class="montant" id="encaisser">—</div><div class="gris" id="frais"></div></div>
+  <div id="message"></div>
+  <div class="gris" style="text-align:center">Besoin d'aide ? Boutique : <span id="boutique-tel"></span></div>
+</main>
+<div class="barre">
+  <div class="boutons" id="actions"></div>
+  <div class="confirmer" id="confirmer"><div class="alerte">Confirmez que le colis a bien été remis au client<span id="rappel-encaisser"></span>.</div>
+    <div class="boutons"><button class="btn" id="annuler">Annuler</button><button class="btn vert" id="oui">Oui, remis</button></div></div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="/livraison.js"></script>
+</body></html>

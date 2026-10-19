@@ -4275,6 +4275,79 @@ const communesReconnues = (zone) => Object.keys(motsZone(zone));
 
 
 
+/* =====================================================================
+   Suivi en direct : lien du colis pour le livreur et carte (Leaflet + OpenStreetMap)
+   ===================================================================== */
+let promesseLeaflet = null;
+const chargerLeaflet = () => promesseLeaflet || (promesseLeaflet = new Promise((ok, ko) => {
+  if (window.L) return ok(window.L);
+  const css = document.createElement("link"); css.rel = "stylesheet"; css.href = "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"; document.head.appendChild(css);
+  const js = document.createElement("script"); js.src = "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"; js.onload = () => ok(window.L); js.onerror = () => { promesseLeaflet = null; ko(new Error("Carte indisponible")); };
+  document.head.appendChild(js);
+}));
+const depuis = (iso) => { const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000); return m < 1 ? "à l'instant" : m < 60 ? `il y a ${m} min` : `il y a ${Math.round(m / 60)} h`; };
+const distanceTexte = (m) => (m == null ? "" : m < 1000 ? m + " m" : (m / 1000).toFixed(1).replace(".", ",") + " km");
+
+/** Envoie au livreur le lien de son colis (WhatsApp vers son numéro s'il est connu, sinon copie). */
+async function envoyerLienLivreur(c, livreur, toast) {
+  try {
+    const r = await apiFetch("POST", `/api/commandes/${c.id}/lien-livreur`, {});
+    const lien = `${location.origin}/livraison.html#${r.jeton}`;
+    const texte = `Bonjour${livreur?.nom ? " " + livreur.nom.split(" ")[0] : ""}, colis ${c.numero} à livrer à ${c.client?.nom || "notre client"}${c.adresseLivraison ? " (" + c.adresseLivraison + ")" : ""}. Ouvrez ce lien pour les articles, le contact du client et la carte (autorisez la localisation) : ${lien}`;
+    try { await navigator.clipboard.writeText(lien); } catch { /* copie impossible : le lien part par WhatsApp */ }
+    const tel = livreur?.tel ? telInternational(livreur.tel) : "";
+    window.open(`https://wa.me/${tel}?text=${encodeURIComponent(texte)}`, "_blank", "noopener");
+    toast({ title: "Lien du colis prêt", desc: tel ? "WhatsApp s'ouvre vers le livreur ; le lien est aussi copié." : "Choisissez le livreur dans WhatsApp ; le lien est aussi copié." });
+  } catch (e) { toast({ title: "Lien impossible", desc: e.message, tone: "critical" }); }
+}
+
+function CarteDirect() {
+  const ref = useRef(null), carteRef = useRef(null), calquesRef = useRef(null);
+  const [colis, setColis] = useState([]);
+  const [erreur, setErreur] = useState("");
+  const charger = useCallback(() => apiFetch("GET", "/api/livreurs/suivi").then((r) => setColis(r.colis || [])).catch(() => {}), []);
+  useEffect(() => { charger(); const t = setInterval(charger, 15000); return () => clearInterval(t); }, [charger]);
+  useEffect(() => {
+    let annule = false;
+    chargerLeaflet().then((L) => {
+      if (annule || carteRef.current || !ref.current) return;
+      carteRef.current = L.map(ref.current).setView([5.345, -4.024], 12);
+      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(carteRef.current);
+      calquesRef.current = L.layerGroup().addTo(carteRef.current);
+      setColis((x) => [...x]);
+    }).catch((e) => setErreur(e.message));
+    return () => { annule = true; };
+  }, []);
+  useEffect(() => {
+    const L = window.L, carte = carteRef.current, calques = calquesRef.current;
+    if (!L || !carte || !calques) return;
+    calques.clearLayers();
+    const pts = [];
+    for (const c of colis) {
+      if (c.trace?.length > 1) L.polyline(c.trace.map((p) => [p.lat, p.lng]), { color: "#B8862B", weight: 3, opacity: .6 }).addTo(calques);
+      if (c.position) {
+        const ll = [c.position.lat, c.position.lng]; pts.push(ll);
+        L.circleMarker(ll, { radius: 9, color: "#fff", weight: 3, fillColor: c.en_direct ? "#1F7A45" : "#8B8277", fillOpacity: 1 }).addTo(calques)
+          .bindTooltip(`${c.livreur || "Livreur"} · ${c.numero} · ${depuis(c.position.le)}${c.distance != null ? " · client à " + distanceTexte(c.distance) : ""}`);
+      }
+      if (c.destination) { const ll = [c.destination.lat, c.destination.lng]; pts.push(ll); L.circleMarker(ll, { radius: 7, color: "#fff", weight: 2, fillColor: "#B8862B", fillOpacity: 1 }).addTo(calques).bindTooltip(`Client · ${c.numero}`); }
+    }
+    if (pts.length) carte.fitBounds(pts, { padding: [30, 30], maxZoom: 15 });
+  }, [colis]);
+  const suivis = colis.filter((c) => c.lien_cree || c.position);
+  const etatColis = (c) => c.recu_client_le ? ["success", "Reçu, confirmé par le client"] : c.statut === "livree" ? ["success", "Livré"] : c.arrive_le ? ["info", `Arrivé${c.arrive_distance != null ? " à " + distanceTexte(c.arrive_distance) + " du client" : ""}`] : c.en_direct ? ["success", "En direct"] : c.ouvert_le ? ["warning", "Lien ouvert, position ancienne"] : c.lien_cree ? ["neutral", "Lien envoyé, pas encore ouvert"] : ["neutral", "—"];
+  return (
+    <Card title="Carte en direct" sub="Position des livreurs qui ont ouvert le lien de leur colis, actualisée toutes les 15 secondes" padded={false} style={{ marginBottom: 16 }}>
+      {erreur ? <div className="banner banner-warning" style={{ margin: 12 }}><Info size={16} /><div>{erreur}</div></div> : <div ref={ref} className="carte-direct" />}
+      {suivis.length === 0 ? <p className="subtle" style={{ padding: "10px 16px 14px", margin: 0 }}>Envoyez à un livreur le lien de son colis (bouton <b>Lien livreur</b> sur chaque colis) : dès qu'il l'ouvre, il apparaît ici.</p> : (
+        <div className="list">{suivis.map((c) => { const [ton, txt] = etatColis(c); return (
+          <div key={c.id} className="list-item"><div className="grow"><div className="row-between"><span className="strong">{c.numero} · {c.livreur || "Livreur"}</span><Badge tone={ton} dot>{txt}</Badge></div>
+            <div className="subtle">{c.adresse || "Adresse à préciser"}{c.position ? " · position " + depuis(c.position.le) : ""}{c.distance != null && c.statut !== "livree" ? " · client à " + distanceTexte(c.distance) : ""}{!c.destination && c.statut !== "livree" ? " · le client n'a pas partagé sa position" : ""}</div></div></div>); })}</div>
+      )}
+    </Card>
+  );
+}
+
 function PageLivraisons() {
   const { data, update, sync, go, toast, estAdmin, openSale } = useApp();
   const [tab, setTab] = useState("a_preparer");
@@ -4397,6 +4470,7 @@ function PageLivraisons() {
         ))}
       </div>
       {livreurs.length === 0 && estAdmin && <div className="banner banner-info" style={{ marginBottom: 16 }}><Info size={16} /><div>Ajoutez vos livreurs pour leur confier des colis et leur envoyer leur feuille de route. <button className="link" onClick={() => setGerer(true)}>Ajouter un livreur</button></div></div>}
+      <CarteDirect />
       {attribuables.length > 0 && <div className="banner banner-info" style={{ marginBottom: 16, alignItems: "center" }}><MapPin size={16} /><div className="grow"><b>{attribuables.length} colis sans livreur</b> se trouvent dans la zone d'un de vos livreurs.</div><Btn size="sm" variant="primary" onClick={attribuerSelonZone}>Attribuer selon la zone</Btn></div>}
       {retards > 0 && <div className="banner banner-warning" style={{ marginBottom: 16 }}><AlertTriangle size={16} /><div><b>{retards} colis en retard</b> sur la date de livraison prévue. <button className="link" onClick={() => setTab("retard")}>Voir ces colis</button></div></div>}
 
@@ -4466,6 +4540,7 @@ function PageLivraisons() {
                           <Btn size="sm" variant="primary" icon={PackageCheck} onClick={() => livrer(c)}>Livré</Btn>
                           <Btn size="sm" variant="critical-plain" onClick={() => setEchec(c)}>Échec</Btn>
                         </>}
+                        {!fini && <Btn size="sm" icon={Send} onClick={() => envoyerLienLivreur(c, livreurs.find((l) => l.id === c.livreurId), toast)}>Lien livreur</Btn>}
                         {!fini && (c.contactTel || c.client?.tel) && <button className="icon-btn" title="Prévenir le client (WhatsApp)" aria-label="Prévenir le client" onClick={() => prevenirClient(c)}><MessageSquare size={15} /></button>}
                       </span></td>
                     </tr>

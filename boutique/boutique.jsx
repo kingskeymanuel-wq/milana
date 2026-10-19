@@ -1406,6 +1406,40 @@ const ETAPES = [
   { k: "livree", label: "Livrée", icon: PackageCheck },
 ];
 
+/* Livraison suivie en direct : le client guide le livreur et confirme la réception */
+function SuiviLivraisonClient({ c, jeton, recharger }) {
+  const { toast } = useBoutique();
+  const s = c.suivi;
+  const [busy, setBusy] = useState(false);
+  const partager = () => {
+    if (!("geolocation" in navigator)) return toast({ title: "Localisation indisponible sur ce téléphone", tone: "critical" });
+    setBusy(true);
+    navigator.geolocation.getCurrentPosition(async (p) => {
+      try { await api("POST", `/api/boutique/commandes/${encodeURIComponent(jeton)}/position`, { lat: p.coords.latitude, lng: p.coords.longitude, precision: p.coords.accuracy }); toast({ title: "Position partagée", desc: "Le livreur vous trouvera plus facilement." }); recharger(); }
+      catch (e) { toast({ title: "Partage impossible", desc: e.message, tone: "critical" }); }
+      finally { setBusy(false); }
+    }, () => { setBusy(false); toast({ title: "Localisation refusée", desc: "Autorisez-la dans votre navigateur pour la partager.", tone: "critical" }); }, { enableHighAccuracy: true, timeout: 20000 });
+  };
+  const recu = async () => { setBusy(true); try { await api("POST", `/api/boutique/commandes/${encodeURIComponent(jeton)}/recu`); toast({ title: "Merci !", desc: "Réception confirmée." }); recharger(); } catch (e) { toast({ title: "Erreur", desc: e.message, tone: "critical" }); } finally { setBusy(false); } };
+  const d = s.distance == null ? "" : s.distance < 1000 ? s.distance + " m" : (s.distance / 1000).toFixed(1).replace(".", ",") + " km";
+  return (
+    <section className="card card-body" style={{ marginBottom: 14 }}>
+      <div className="card-title" style={{ marginBottom: 8 }}>Livraison</div>
+      {s.recu_client_le ? <div className="banner banner-success"><CheckCircle2 size={16} /><div>Vous avez confirmé la réception. Merci !</div></div>
+        : s.en_route ? <div className="banner banner-info"><Truck size={16} /><div><b>{s.livreur || "Votre livreur"} est en route</b>{d ? <> : il est à <b>{d}</b> de vous.</> : "."}</div></div>
+        : s.arrive_le ? <div className="banner banner-info"><Truck size={16} /><div><b>{s.livreur || "Votre livreur"} est arrivé.</b></div></div>
+        : <p className="muted" style={{ margin: 0 }}>Vous serez prévenu quand votre colis partira.</p>}
+      {!s.recu_client_le && c.statut !== "annulee" && (
+        <div className="row" style={{ gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+          {!s.position_partagee && c.statut !== "livree" && <Btn icon={MapPin} loading={busy} onClick={partager}>Partager ma position avec le livreur</Btn>}
+          {s.position_partagee && c.statut !== "livree" && <span className="muted">Position partagée ✓</span>}
+          {(c.statut === "expediee" || c.statut === "livree" || s.arrive_le) && <Btn variant="primary" icon={CheckCircle2} loading={busy} onClick={recu}>J'ai bien reçu ma commande</Btn>}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function PageSuivi({ jeton, ticketSeul }) {
   const { toast, config } = useBoutique();
   const [c, setC] = useState(null);
@@ -1475,6 +1509,7 @@ function PageSuivi({ jeton, ticketSeul }) {
         <div className="banner banner-critical"><XCircle size={16} /><div><b>Commande annulée.</b> {sp === "echoue" ? "Le paiement en ligne n'a pas abouti : aucun montant n'a été débité par la boutique. Vous pouvez repasser commande." : "Contactez-nous pour toute question."}</div></div>
       )}
 
+      {c.suivi && !annulee && <SuiviLivraisonClient c={c} jeton={jeton} recharger={charger} />}
       <div className="v-suivi-grille">
         <div className="stack">
           {!annulee && (

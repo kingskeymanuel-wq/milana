@@ -469,8 +469,22 @@ router.get("/commandes/:jeton", espaceParJeton((req) => lireParJeton(req.params.
     contact: { telephone: cfg.boutique.telephone, whatsapp: cfg.boutique.whatsapp },
     boutique_slug: cfg.slug,
     client: nomCourt(t.client),
+    suivi: require("../lib/suivi").pourClient(cmd),
   });
 });
+
+/* ---------------------------------------------------------------- suivi en direct */
+const suiviLivraison = require("../lib/suivi");
+const limiteSuivi = rateLimit({ windowMs: 15 * 60 * 1000, max: 400, standardHeaders: true, legacyHeaders: false, message: { erreur: "Trop de requêtes, réessayez dans un instant." } });
+const espaceLivraison = espaceParJeton((req) => suiviLivraison.colisParJeton(req.params.jeton));
+const colisDe = (req, res) => { const c = suiviLivraison.colisParJeton(req.params.jeton); if (!c) res.status(404).json({ erreur: "Ce lien de livraison n'est plus valable." }); return c; };
+const repondre = (res, r) => res.status(r.erreur ? 400 : 200).json(r);
+router.get("/livraison/:jeton", limiteSuivi, espaceLivraison, (req, res) => { const c = colisDe(req, res); if (c) res.json(suiviLivraison.detailsColis(c)); });
+router.post("/livraison/:jeton/position", limiteSuivi, espaceLivraison, (req, res) => { const c = colisDe(req, res); if (c) repondre(res, suiviLivraison.enregistrerPosition(c, req.body || {})); });
+router.post("/livraison/:jeton/:action(depart|arrive|remis)", limiteSuivi, espaceLivraison, (req, res) => { const c = colisDe(req, res); if (c) repondre(res, suiviLivraison.action(c, req.params.action, req.body || {})); });
+const espaceCommande = espaceParJeton((req) => lireParJeton(req.params.jeton));
+router.post("/commandes/:jeton/position", limiteSuivi, espaceCommande, (req, res) => { const c = lireParJeton(req.params.jeton); if (!c) return res.status(404).json({ erreur: "Commande introuvable" }); repondre(res, suiviLivraison.positionClient(c, req.body)); });
+router.post("/commandes/:jeton/recu", limiteSuivi, espaceCommande, (req, res) => { const c = lireParJeton(req.params.jeton); if (!c) return res.status(404).json({ erreur: "Commande introuvable" }); repondre(res, suiviLivraison.recuClient(c)); });
 
 /* ---------------------------------------------------------------- désinscription */
 

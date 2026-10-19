@@ -1686,3 +1686,7 @@ body { background: transparent; }
 
 /* Livraisons : livreur proposé selon la zone */
 .chip-proposition { display: inline-flex; margin-top: 6px; font-size: 12px; padding: 4px 9px; border-style: dashed; color: var(--brand-strong); background: var(--brand-soft); cursor: pointer; }
+
+/* Carte en direct des livraisons */
+.carte-direct { height: 340px; border-bottom: 1px solid var(--divider); z-index: 0; }
+@media (max-width: 640px) { .carte-direct { height: 260px; } }

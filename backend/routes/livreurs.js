@@ -15,6 +15,9 @@ const lire = (id) => db.prepare("SELECT * FROM livreurs WHERE id = ? AND supprim
 const texte = (v, max) => String(v ?? "").trim().slice(0, max);
 const serialiser = (l) => l && { ...l, cree_le: versIso(l.cree_le) };
 
+// GET /api/livreurs/suivi — colis en cours et position en direct des livreurs (le vendeur ne voit que ses colis)
+router.get("/suivi", (req, res) => res.json({ colis: require("../lib/suivi").vue(req.user?.role === "admin" ? null : req.user?.id) }));
+
 router.get("/", (req, res) => {
   res.json(db.prepare("SELECT * FROM livreurs WHERE supprime = 0 ORDER BY actif DESC, nom").all().map(serialiser));
 });

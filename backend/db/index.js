@@ -74,6 +74,9 @@ function ouvrirEspace(fichier) {
   CREATE TABLE IF NOT EXISTS caisse_remises (
     id TEXT PRIMARY KEY, jour TEXT NOT NULL, de_type TEXT NOT NULL, de_id TEXT NOT NULL, montant INTEGER NOT NULL,
     moyen TEXT NOT NULL DEFAULT 'Espèces', note TEXT, recu_par TEXT, cree_le TEXT NOT NULL);`);
+  // Suivi en direct : lien du colis pour le livreur, destination partagée par le client, arrivée, réception
+  for (const [col, def] of [["jeton_livraison", "TEXT"], ["livraison_ouverte_le", "TEXT"], ["livreur_contact", "TEXT"], ["dest_lat", "REAL"], ["dest_lng", "REAL"],
+    ["arrive_le", "TEXT"], ["arrive_lat", "REAL"], ["arrive_lng", "REAL"], ["arrive_distance", "INTEGER"], ["recu_client_le", "TEXT"]]) ajouterColonne("commandes", col, def);
   ajouterColonne("ventes", "encaisse_par", "TEXT"); // qui a encaissé (paiement à la livraison confirmé plus tard)
   ajouterColonne("ventes", "sur_compte_vendeur", "INTEGER NOT NULL DEFAULT 0"); // 1 = payé sur le Mobile Money personnel du vendeur
   // Montant réellement payé par le client, figé au paiement (lignes + livraison) : un retour ultérieur ne l'efface pas
@@ -89,6 +92,9 @@ function ouvrirEspace(fichier) {
   CREATE TRIGGER IF NOT EXISTS ventes_montant_paye_insert AFTER INSERT ON ventes WHEN NEW.statut_paiement = 'payee' AND NEW.commande_id IS NOT NULL
     BEGIN UPDATE commandes SET montant_paye = ROUND((SELECT SUM(quantite * prix_unitaire) FROM ventes WHERE commande_id = commandes.id) + COALESCE(frais_livraison, 0))
       WHERE id = NEW.commande_id AND montant_paye IS NULL AND statut <> 'annulee' AND NOT EXISTS (SELECT 1 FROM ventes WHERE commande_id = NEW.commande_id AND statut_paiement <> 'payee'); END;
+  CREATE TABLE IF NOT EXISTS livraison_positions (
+    id TEXT PRIMARY KEY, commande_id TEXT NOT NULL, lat REAL NOT NULL, lng REAL NOT NULL, precision_m INTEGER, cree_le TEXT NOT NULL);
+  CREATE INDEX IF NOT EXISTS idx_positions_commande ON livraison_positions(commande_id, cree_le);
   CREATE TABLE IF NOT EXISTS releves_mm_imports (
     id TEXT PRIMARY KEY, operateur TEXT NOT NULL, nb_lignes INTEGER NOT NULL, nb_ajoutees INTEGER NOT NULL, du TEXT, au TEXT, importe_par TEXT, importe_le TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS releves_mm (

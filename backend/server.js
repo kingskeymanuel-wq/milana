@@ -42,10 +42,10 @@ app.use(
         // React / les icônes depuis des CDN : d'où 'unsafe-eval' et ces origines.
         // cdnjs : génération du PDF (jsPDF) et du QR code des tickets de caisse
         scriptSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com"],
-        styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+        styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://cdnjs.cloudflare.com"],
         fontSrc: ["'self'", "https://fonts.gstatic.com"],
         // images.unsplash.com : photos d'illustration des produits de test
-        imgSrc: ["'self'", "data:", "blob:", "https://images.unsplash.com"],
+        imgSrc: ["'self'", "data:", "blob:", "https://images.unsplash.com", "https://tile.openstreetmap.org", "https://cdnjs.cloudflare.com"],
         // Aperçu du ticket PDF généré dans le navigateur (blob:)
         frameSrc: ["'self'", "blob:"],
         connectSrc: ["'self'", "https://esm.sh", "https://unpkg.com", "https://cdnjs.cloudflare.com"],

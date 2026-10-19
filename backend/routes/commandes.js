@@ -353,6 +353,14 @@ router.post("/:id/retour", (req, res) => {
   res.status(201).json({ commande: enrichir(lire(cmd.id)), difference });
 });
 
+// POST /api/commandes/:id/lien-livreur { nouveau? } — lien du colis à envoyer au livreur
+router.post("/:id/lien-livreur", (req, res) => {
+  const c = lire(req.params.id);
+  if (!c || !aMoi(c, req)) return res.status(404).json({ erreur: "Commande introuvable" });
+  const r = require("../lib/suivi").lienColis(c.id, req.body?.nouveau === true);
+  res.status(r.erreur ? 400 : 200).json(r);
+});
+
 router.delete("/:id", adminOnly, (req, res) => {
   const cmd = lire(req.params.id);
   if (!cmd) return res.status(404).json({ erreur: "Commande introuvable" });
