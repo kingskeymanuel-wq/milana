@@ -1690,3 +1690,9 @@ body { background: transparent; }
 /* Carte en direct des livraisons */
 .carte-direct { height: 340px; border-bottom: 1px solid var(--divider); z-index: 0; }
 @media (max-width: 640px) { .carte-direct { height: 260px; } }
+
+/* Envoi du ticket : un bouton par moyen, aperçu du message */
+.envoi-ticket { display: flex; flex-direction: column; gap: 8px; }
+.envoi-ticket .btn { justify-content: flex-start; }
+.apercu-message summary { cursor: pointer; color: var(--link); font-size: 13px; }
+.apercu-message pre { white-space: pre-wrap; font: 12.5px/1.5 'IBM Plex Mono', ui-monospace, monospace; background: var(--surface-2); border-radius: 10px; padding: 10px 12px; margin: 8px 0 0; max-height: 220px; overflow: auto; }

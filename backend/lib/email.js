@@ -26,7 +26,8 @@ function obtenirTransport() {
 }
 
 /** Envoie un e-mail. Renvoie { simule: true } si aucun serveur SMTP n'est configuré. */
-async function envoyerEmail({ a, sujet, texte, html }) {
+// pieces : fichiers joints [{ nom, contenu (Buffer), type }] — par exemple le ticket de caisse en PDF
+async function envoyerEmail({ a, sujet, texte, html, pieces = [] }) {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(a || ""))) throw new Error("Adresse e-mail invalide");
   if (!estConfigure()) {
     console.log(`[E-MAIL SIMULÉ] À ${a} — ${sujet}`);
@@ -38,6 +39,7 @@ async function envoyerEmail({ a, sujet, texte, html }) {
     subject: sujet,
     text: texte,
     html,
+    attachments: pieces.map((p) => ({ filename: p.nom, content: p.contenu, contentType: p.type })),
   });
   return { id: info.messageId };
 }

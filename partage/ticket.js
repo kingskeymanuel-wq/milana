@@ -185,6 +185,19 @@ export async function telechargerTicketPdf(t) {
   (await construirePdf(t)).save(nomFichier(t));
 }
 
+/** Le ticket PDF en fichier, pour le partager tel quel (WhatsApp…) avec le partage du téléphone. */
+export async function fichierTicketPdf(t) {
+  return new File([(await construirePdf(t)).output("blob")], nomFichier(t), { type: "application/pdf" });
+}
+
+/** Le téléphone sait-il partager un fichier PDF vers une autre application ? (vrai sur la plupart des mobiles) */
+export const partagePdfPossible = () => typeof navigator.canShare === "function" && navigator.canShare({ files: [new File([""], "ticket.pdf", { type: "application/pdf" })] });
+
+/** Le ticket PDF encodé en base64, pour le joindre à un e-mail envoyé par le serveur. */
+export async function base64TicketPdf(t) {
+  return (await construirePdf(t)).output("datauristring").split(",")[1];
+}
+
 /** URL (blob:) du ticket PDF, pour l'afficher directement dans la page. */
 export async function urlTicketPdf(t) {
   return (await construirePdf(t)).output("bloburl");

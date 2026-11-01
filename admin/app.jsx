@@ -13,7 +13,7 @@ import {
   Boxes, Megaphone, Percent, Send, History, ClipboardList, PackagePlus, PackageMinus, CalendarClock, FileText, Gift,
   UserCheck, Link2, KeyRound, ExternalLink,
 } from "lucide-react";
-import { lignesTicket, telechargerTicketPdf, urlTicketPdf, pdfIntegrable, telInternational, genererQr, cheminQr, lienTicket } from "../partage/ticket.js";
+import { lignesTicket, telechargerTicketPdf, urlTicketPdf, pdfIntegrable, telInternational, genererQr, cheminQr, lienTicket, fichierTicketPdf, partagePdfPossible, base64TicketPdf } from "../partage/ticket.js";
 
 /* =====================================================================
    MILANA — administration de boutique (style Shopify)
@@ -1632,7 +1632,9 @@ function EmailTicketModal({ open, onClose, t, cmd, onEnvoye }) {
       return;
     }
     setBusy(true);
-    const r = await sync(["POST", `/api/commandes/${cmd.id}/envoyer-email`, { email: e }]);
+    let pdf = null;
+    try { pdf = await base64TicketPdf(t); } catch { /* sans pièce jointe : le lien du ticket suffit */ }
+    const r = await sync(["POST", `/api/commandes/${cmd.id}/envoyer-email`, { email: e, pdf }]);
     setBusy(false);
     if (!r) return;
     toast({ title: r[0]?.simule ? "E-mail simulé" : "Ticket envoyé par e-mail", desc: r[0]?.simule ? "Aucun serveur e-mail (SMTP) configuré sur l'hébergement." : `À ${e}` });
@@ -1643,10 +1645,69 @@ function EmailTicketModal({ open, onClose, t, cmd, onEnvoye }) {
     <Modal open={open} onClose={onClose} title="Envoyer le ticket par e-mail" size="sm"
       footer={<><Btn onClick={onClose}>Annuler</Btn><Btn variant="primary" icon={Send} loading={busy} onClick={envoyer}>Envoyer</Btn></>}>
       <div className="stack-sm">
-        <p className="subtle">Le client reçoit son ticket {t.numero_ticket || t.numero} ({fmt(t.total)}) avec le lien de téléchargement du PDF.</p>
-        <Field label="Adresse e-mail du client" error={err} help={cmd?.client && !cmd.client.email ? "Elle sera aussi enregistrée sur la fiche du client." : null}>
+        <p className="subtle">Le destinataire reçoit le ticket {t.numero_ticket || t.numero} ({fmt(t.total)}) en PDF joint, avec le détail des articles, le vendeur et le lien du ticket.</p>
+        <Field label="Adresse e-mail du destinataire" error={err} help={cmd?.client && !cmd.client.email ? "Elle sera aussi enregistrée sur la fiche du client." : null}>
           <Input icon={Mail} type="email" value={email} onChange={(ev) => { setEmail(ev.target.value); setErr(""); }} placeholder="client@exemple.ci" data-autofocus onKeyDown={(ev) => ev.key === "Enter" && envoyer()} />
         </Field>
+      </div>
+    </Modal>
+  );
+}
+
+/* Message du ticket : boutique, vendeur, articles, total et paiement, puis le lien du PDF */
+function messageTicket(t) {
+  const p = t.paiement || {};
+  return [
+    `*${t.boutique?.nom || "Ma Boutique"}* — ticket de caisse ${t.numero_ticket || t.numero}`,
+    [t.vendeur && `Vendeur : ${t.vendeur}`, t.client && `Client : ${t.client}`].filter(Boolean).join(" · ") || null,
+    "",
+    ...(t.lignes || []).map((l) => `• ${l.quantite} × ${l.nom} : ${fmt(l.total)}`),
+    t.frais_livraison > 0 ? `• Livraison : ${fmt(t.frais_livraison)}` : null,
+    `*Total : ${fmt(t.total)}*${p.statut === "en_attente" ? " (à payer à la livraison)" : p.mode ? ` (payé · ${p.mode})` : ""}`,
+    "",
+    t.lien ? `Votre ticket (PDF) : ${t.lien}` : null,
+    t.boutique?.message || "Merci pour votre achat !",
+  ].filter((x) => x != null).join("\n");
+}
+
+function EnvoiTicketModal({ open, onClose, t, cmd, marquer }) {
+  const { mode, sync, toast } = useApp();
+  const [tel, setTel] = useState("");
+  const [busy, setBusy] = useState("");
+  useEffect(() => { if (open) { setTel(cmd?.contactTel || cmd?.client?.tel || ""); setBusy(""); } }, [open]);
+  const numero = chiffres(tel).length >= 8 ? telInternational(tel) : "";
+  const texte = messageTicket(t);
+  const partagerPdf = async () => {
+    setBusy("pdf");
+    try {
+      const fichier = await fichierTicketPdf(t);
+      await navigator.share({ files: [fichier], title: `Ticket ${t.numero_ticket || t.numero}`, text: texte });
+      marquer("pdf"); toast({ title: "Ticket PDF partagé" }); onClose();
+    } catch (e) { if (e?.name !== "AbortError") toast({ title: "Partage impossible", desc: "Utilisez WhatsApp ou le bouton PDF.", tone: "critical" }); }
+    finally { setBusy(""); }
+  };
+  const whatsapp = () => {
+    window.open(`https://wa.me/${numero}?text=${encodeURIComponent(texte)}`, "_blank", "noopener");
+    marquer("whatsapp"); onClose();
+  };
+  const sms = async () => {
+    setBusy("sms");
+    const r = await sync(["POST", `/api/commandes/${cmd.id}/envoyer-recu`, { telephone: tel.trim() }]);
+    setBusy("");
+    if (r) { marquer("sms", false); toast({ title: r[0]?.simule ? "SMS simulé" : "Ticket envoyé par SMS", desc: r[0]?.simule ? "Aucun fournisseur SMS configuré sur le serveur." : `Au ${tel.trim()}` }); onClose(); }
+  };
+  return (
+    <Modal open={open} onClose={onClose} title="Envoyer le ticket" size="sm" footer={<Btn onClick={onClose}>Fermer</Btn>}>
+      <div className="stack-sm">
+        <Field label="Numéro du destinataire" help={numero ? "Le client de la commande par défaut : vous pouvez le changer." : "Sans numéro, WhatsApp vous laisse choisir le contact."} optional>
+          <Input icon={Phone} type="tel" inputMode="tel" value={tel} onChange={(ev) => setTel(ev.target.value)} placeholder="07 00 00 00 00" data-autofocus />
+        </Field>
+        <div className="envoi-ticket">
+          {partagePdfPossible() && <Btn variant="brand" icon={FileText} loading={busy === "pdf"} onClick={partagerPdf}>Envoyer le PDF (WhatsApp…)</Btn>}
+          <Btn icon={MessageSquare} onClick={whatsapp}>{numero ? "WhatsApp à ce numéro" : "WhatsApp"} (message + lien)</Btn>
+          {mode === "api" && cmd && <Btn icon={Smartphone} loading={busy === "sms"} disabled={!numero} onClick={sms}>SMS à ce numéro</Btn>}
+        </div>
+        <details className="apercu-message"><summary>Voir le message envoyé</summary><pre>{texte}</pre></details>
       </div>
     </Modal>
   );
@@ -1663,10 +1724,8 @@ const REMISE_TICKET = new Set(["imprime", "pdf", "whatsapp", "sms", "email", "co
 function ActionsTicket({ t, cmd, compact }) {
   const { toast, mode, sync, update } = useApp();
   const [pdf, setPdf] = useState(false);
-  const [sms, setSms] = useState(false);
+  const [envoi, setEnvoi] = useState(false);
   const [mail, setMail] = useState(false);
-  const telephoner = cmd?.contactTel || cmd?.client?.tel;
-  const texte = `${t.boutique?.nom} : merci pour votre achat (ticket ${t.numero_ticket || t.numero}, ${fmt(t.total)}).${t.lien ? " Votre ticket de caisse : " + t.lien : ""}`;
   /* Journalise l'action ; « serveur » = le serveur ne l'a pas déjà enregistrée lui-même */
   const marquer = (action, serveur = true) => {
     if (!cmd) return;
@@ -1684,22 +1743,16 @@ function ActionsTicket({ t, cmd, compact }) {
     catch (e) { toast({ title: "Téléchargement impossible", desc: e.message, tone: "critical" }); }
     finally { setPdf(false); }
   };
-  const envoyerSms = async () => {
-    setSms(true);
-    const r = await sync(["POST", `/api/commandes/${cmd.id}/envoyer-recu`, {}]);
-    setSms(false);
-    if (r) { marquer("sms", false); toast({ title: r[0]?.simule ? "SMS simulé" : "Ticket envoyé par SMS", desc: r[0]?.simule ? "Aucun fournisseur SMS configuré sur le serveur." : `Au ${telephoner}` }); }
-  };
   return (
     <div className={cx("ticket-actions", compact && "compact")}>
       {/* Copie du ticket réservée à l'impression (format 80 mm) */}
       {createPortal(<div className="print-zone"><TicketCaisse t={t} /></div>, document.body)}
       <Btn icon={Printer} onClick={() => { window.print(); marquer("imprime"); }}>Imprimer</Btn>
       <Btn icon={Download} loading={pdf} onClick={telecharger}>PDF</Btn>
-      {telephoner && <Btn icon={MessageSquare} onClick={() => { window.open(`https://wa.me/${telInternational(telephoner)}?text=${encodeURIComponent(texte)}`, "_blank", "noopener"); marquer("whatsapp"); }}>WhatsApp</Btn>}
+      <Btn icon={Send} onClick={() => setEnvoi(true)}>Envoyer</Btn>
       {cmd && <Btn icon={Mail} onClick={() => setMail(true)}>E-mail</Btn>}
-      {mode === "api" && telephoner && <Btn icon={Smartphone} loading={sms} onClick={envoyerSms}>SMS</Btn>}
       {t.lien && <Btn icon={Copy} onClick={() => navigator.clipboard?.writeText(t.lien).then(() => { marquer("lien"); toast({ title: "Lien du ticket copié" }); }, () => toast({ title: "Copie impossible", tone: "critical" }))}>Lien</Btn>}
+      <EnvoiTicketModal open={envoi} onClose={() => setEnvoi(false)} t={t} cmd={cmd} marquer={marquer} />
       {cmd && <EmailTicketModal open={mail} onClose={() => setMail(false)} t={t} cmd={cmd} onEnvoye={() => marquer("email", mode !== "api")} />}
     </div>
   );
@@ -1725,13 +1778,18 @@ function SaleModal({ open, preset, onClose }) {
   const [saving, setSaving] = useState(false);
   const [apercu, setApercu] = useState(false);
 
-  const reinitialiser = () => {
-    const cl = data.clients.find((x) => x.id === preset?.clientId);
+  const reinitialiser = (neuve) => {
+    const cl = !neuve && data.clients.find((x) => x.id === preset?.clientId);
     setC(cl ? { tel: cl.tel, nom: cl.nom, adresse: "", ville: cl.ville || "" } : vide);
-    setCat(""); setQp(""); setPanier(preset?.packId ? [{ packId: preset.packId, qte: 1 }] : []); setLivraison(false); setFrais(String(fraisBoutique || "")); setB2b(false);
+    setCat(""); setQp(""); setPanier(!neuve && preset?.packId ? [{ packId: preset.packId, qte: 1 }] : []); setLivraison(false); setFrais(String(fraisBoutique || "")); setB2b(false);
     setPay(paiementVide()); setErr({}); setDone(null); setSaving(false); setApercu(false);
   };
   useEffect(() => { if (open) reinitialiser(); }, [open]);
+  // Nouvelle vente en une touche, même si le ticket n'est pas encore remis : il reste dans « Tickets »
+  const venteSuivante = (ticketRemis, numeroTicket) => {
+    if (!ticketRemis) toast({ title: `Ticket ${numeroTicket || ""} à remettre au client`, desc: "Retrouvez-le dans Tickets pour l'imprimer ou l'envoyer." });
+    reinitialiser(true);
+  };
 
   // Client reconnu à son numéro : on travaille avec le téléphone
   const client = chiffres(c.tel).length >= 8 ? data.clients.find((x) => chiffres(x.tel) === chiffres(c.tel)) : null;
@@ -1842,9 +1900,9 @@ function SaleModal({ open, preset, onClose }) {
             </div>
           )}
           <div className="row" style={{ flexWrap: "wrap", justifyContent: "center" }}>
+            <Btn variant="brand" size="lg" icon={Plus} onClick={() => venteSuivante(remis, cmdFinale?.numeroTicket)}>Nouvelle vente</Btn>
+            <Btn disabled={!remis} onClick={() => { onClose(); go("commandes", done.cmdId); }}>Voir la commande</Btn>
             <Btn onClick={fermer} disabled={!remis}>Fermer</Btn>
-            <Btn onClick={reinitialiser} icon={Plus} disabled={!remis}>Autre vente</Btn>
-            <Btn variant="primary" disabled={!remis} onClick={() => { onClose(); go("commandes", done.cmdId); }}>Voir la commande</Btn>
           </div>
           {!remis && estAdmin && <button type="button" className="link" style={{ marginTop: 8 }} onClick={onClose}>Fermer sans remettre le ticket (administrateur)</button>}
         </div>

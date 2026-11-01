@@ -151,19 +151,21 @@ router.patch("/:id/paiement", (req, res) => {
   res.json(enrichir(lire(cmd.id)));
 });
 
-// POST /api/commandes/:id/envoyer-recu — envoie le lien du ticket par SMS au client.
-// Le lien est construit ici : PUBLIC_URL (.env) sinon l'adresse de l'interface.
+// POST /api/commandes/:id/envoyer-recu — { telephone? } : envoie le ticket par SMS (boutique, vendeur, total, lien).
+// Sans numéro saisi : celui de la commande, sinon du client. Le lien est construit ici : PUBLIC_URL (.env) sinon l'adresse de l'interface.
 router.post("/:id/envoyer-recu", async (req, res) => {
   const cmd = lire(req.params.id);
   if (!cmd) return res.status(404).json({ erreur: "Commande introuvable" });
   const vente = lignesCommande(cmd)[0];
   const client = vente && db.prepare("SELECT * FROM clients WHERE id = ?").get(vente.client_id);
-  const telephone = cmd.contact_telephone || client?.telephone;
-  if (!telephone) return res.status(400).json({ erreur: "Ce client n'a pas de numéro de téléphone" });
+  const saisi = String(req.body.telephone || "").trim();
+  if (saisi && !/^\+?[\d\s.-]{8,20}$/.test(saisi)) return res.status(400).json({ erreur: "Numéro du destinataire invalide" });
+  const telephone = saisi || cmd.contact_telephone || client?.telephone;
+  if (!telephone) return res.status(400).json({ erreur: "Indiquez le numéro du destinataire" });
   const lien = `${urlPublique(req)}/#/recu/${cmd.jeton_recu}`;
-  const boutique = db.prepare("SELECT valeur FROM parametres WHERE cle = 'nom'").get()?.valeur || "MILANA";
+  const t = ticketCommande(cmd);
   try {
-    const envoi = await envoyerSms(telephone, `${boutique} : merci pour votre achat (${cmd.numero}). Votre ticket de caisse : ${lien}`);
+    const envoi = await envoyerSms(telephone, `${t.boutique.nom} : merci pour votre achat. Ticket ${t.numero_ticket || t.numero}, total ${Math.round(t.total).toLocaleString("fr-FR")} FCFA${t.vendeur ? `, vendeur ${t.vendeur.replace(/\.$/, "")}` : ""}. Votre ticket (PDF) : ${lien}`);
     ajouterEvenement(cmd.id, { type: "note", texte: `Ticket envoyé par SMS au ${telephone}`, auteurId: req.user?.id });
     journaliser(cmd.id, "sms", req.user?.id, { evenement: false });
     res.json({ message: envoi?.simule ? "SMS simulé (aucun fournisseur configuré)" : "SMS envoyé", simule: !!envoi?.simule });
@@ -172,7 +174,8 @@ router.post("/:id/envoyer-recu", async (req, res) => {
   }
 });
 
-// POST /api/commandes/:id/envoyer-email — { email? } : ticket de caisse par e-mail au client.
+// POST /api/commandes/:id/envoyer-email — { email?, pdf? } : ticket de caisse par e-mail au client.
+// pdf : le ticket PDF fabriqué par l'interface (base64), joint à l'e-mail s'il est valide.
 // Une adresse saisie ici est aussi enregistrée sur la fiche client si elle était vide.
 router.post("/:id/envoyer-email", async (req, res) => {
   const cmd = lire(req.params.id);
@@ -181,9 +184,12 @@ router.post("/:id/envoyer-email", async (req, res) => {
   const client = vente && db.prepare("SELECT * FROM clients WHERE id = ?").get(vente.client_id);
   const email = String(req.body.email || cmd.contact_email || client?.email || "").trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ erreur: "Indiquez une adresse e-mail valide" });
-  const { sujet, html, texte } = ticketEmail(ticketCommande(cmd), `${urlPublique(req)}/#/recu/${cmd.jeton_recu}`);
+  const t = ticketCommande(cmd);
+  const { sujet, html, texte } = ticketEmail(t, `${urlPublique(req)}/#/recu/${cmd.jeton_recu}`);
+  const pdf = typeof req.body.pdf === "string" ? Buffer.from(req.body.pdf.replace(/^data:application\/pdf;[^,]*,/, ""), "base64") : null;
+  const pieces = pdf && pdf.length < 150000 && pdf.subarray(0, 5).toString() === "%PDF-" ? [{ nom: `ticket-${String(t.numero_ticket || t.numero).replace(/[^\w-]/g, "")}.pdf`, contenu: pdf, type: "application/pdf" }] : [];
   try {
-    const envoi = await envoyerEmail({ a: email, sujet, html, texte });
+    const envoi = await envoyerEmail({ a: email, sujet, html, texte, pieces });
     if (client && !client.email) db.prepare("UPDATE clients SET email = ? WHERE id = ?").run(email, client.id);
     journaliser(cmd.id, "email", req.user?.id, { evenement: false });
     ajouterEvenement(cmd.id, { type: "note", texte: `Ticket envoyé par e-mail à ${email}${envoi?.simule ? " (simulé : aucun serveur e-mail configuré)" : ""}`, auteurId: req.user?.id });
