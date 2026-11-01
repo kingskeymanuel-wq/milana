@@ -189,7 +189,9 @@ router.get("/journal-admin", adminOnly, (req, res) => {
 
 // POST /api/donnees/remise-a-zero — { mot_de_passe, elements: ["ventes", "produits", "clients", "capital", "depenses"] }
 router.post("/remise-a-zero", adminOnly, (req, res) => {
-  const elements = [...new Set(Array.isArray(req.body.elements) ? req.body.elements : [])].filter((e) => ELEMENTS_REMISE[e]);
+  // Toujours les ventes d'abord : produits et clients peuvent ensuite être effacés sans rien laisser de rattaché
+  const demandes = new Set(Array.isArray(req.body.elements) ? req.body.elements : []);
+  const elements = Object.keys(ELEMENTS_REMISE).filter((e) => demandes.has(e));
   if (!elements.length) return res.status(400).json({ erreur: "Choisissez au moins un élément à remettre à zéro" });
   const moi = db.prepare("SELECT mot_de_passe FROM utilisateurs WHERE id = ?").get(req.user.id);
   if (!moi || !require("bcryptjs").compareSync(String(req.body.mot_de_passe || ""), moi.mot_de_passe)) return res.status(401).json({ erreur: "Mot de passe incorrect" });
@@ -198,6 +200,11 @@ router.post("/remise-a-zero", adminOnly, (req, res) => {
   db.transaction(() => {
     for (const e of elements) {
       comptes[e] = 0;
+      // Ventes gardées : leurs produits et leurs clients sont retirés de l'affichage (supprime = 1) au lieu d'être
+      // effacés — un produit vendu ne peut pas disparaître, et effacer un client effacerait aussi ses ventes
+      const ventesGardees = !elements.includes("ventes") && db.prepare("SELECT COUNT(*) AS n FROM ventes").get().n > 0;
+      if (ventesGardees && e === "produits") { comptes[e] = db.prepare("UPDATE packs SET supprime = 1, actif = 0, image = NULL WHERE supprime = 0").run().changes; continue; }
+      if (ventesGardees && e === "clients") { comptes[e] = db.prepare("UPDATE clients SET supprime = 1 WHERE supprime = 0").run().changes; continue; }
       for (const t of ELEMENTS_REMISE[e].tables.filter(tableExiste)) comptes[e] += db.prepare(`DELETE FROM ${t}`).run().changes;
     }
     // Ventes effacées : la numérotation des tickets repart de T-000001 (et celle des commandes de #1001)

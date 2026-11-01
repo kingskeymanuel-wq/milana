@@ -2550,7 +2550,8 @@ function PageAccueil() {
    PAGE : Commandes (liste)
    ===================================================================== */
 function PageCommandes({ route }) {
-  const { data, update, sync, go, toast, confirm, openSale, estAdmin } = useApp();
+  const { data, update, sync, go, toast, confirm, openSale, estAdmin, mode, auth } = useApp();
+  const [remiseOpen, setRemiseOpen] = useState(false);
   const [tab, setTab] = useState(route.query.statut || "toutes");
   const [q, setQ] = useState("");
   const [sel, setSel] = useState(() => new Set());
@@ -2604,7 +2605,8 @@ function PageCommandes({ route }) {
 
   return (
     <>
-      <PageHeader title="Commandes" actions={<><Btn icon={Download} onClick={exporter}>Exporter</Btn><Btn variant="primary" icon={Plus} onClick={() => openSale()}>Créer une vente</Btn></>} />
+      <PageHeader title="Commandes" actions={<><Btn icon={Download} onClick={exporter}>Exporter</Btn>{mode === "api" && auth?.utilisateur?.role === "admin" && <Btn variant="critical-plain" icon={RotateCcw} onClick={() => setRemiseOpen(true)}>Remettre à zéro</Btn>}<Btn variant="primary" icon={Plus} onClick={() => openSale()}>Créer une vente</Btn></>} />
+      <RemiseAZeroModal open={remiseOpen} onClose={() => setRemiseOpen(false)} choix={["ventes"]} />
 
       <div className="card stat-strip stagger">
         {strip.map((s, i) => <div key={s.label} style={{ "--i": i }}><div className="label">{s.label}</div><div className="value"><CountUp value={s.value} />{s.suffix}</div></div>)}
@@ -6361,7 +6363,7 @@ function PageParametres() {
             </Row>
             {localDispo && <Row title="Données de ce navigateur" sub="Envoie sur le serveur les données saisies en mode démo."><Btn icon={Upload} onClick={envoyerLocal}>Envoyer vers le serveur</Btn></Row>}
             {enLigne && <Row title="Remettre à zéro" sub="Ventes et tickets, produits, clients, capital investi ou dépenses : vous choisissez."><Btn variant="critical-plain" icon={RotateCcw} onClick={() => setRemiseOpen(true)}>Remettre à zéro</Btn></Row>}
-            <Row title="Données de démonstration" sub="Recharge un jeu de données d'exemple."><Btn variant="critical-plain" icon={RotateCcw} onClick={reset}>Réinitialiser</Btn></Row>
+            {!enLigne && <Row title="Données de démonstration" sub="Recharge un jeu de données d'exemple."><Btn variant="critical-plain" icon={RotateCcw} onClick={reset}>Réinitialiser</Btn></Row>}
           </> : <Row title="Restauration et réinitialisation" sub="Réservées aux administrateurs." />}
         </Card>
         {enLigne && estAdmin && <RemiseAZeroModal open={remiseOpen} onClose={() => setRemiseOpen(false)} />}
