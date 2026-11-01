@@ -264,7 +264,9 @@ router.post("/:id/echec-livraison", (req, res) => {
 router.post("/:id/ticket", (req, res) => {
   const cmd = lire(req.params.id);
   if (!cmd) return res.status(404).json({ erreur: "Commande introuvable" });
-  if (!ACTIONS_VENDEUR.includes(req.body.action)) return res.status(400).json({ erreur: `action doit être l'une de : ${ACTIONS_VENDEUR.join(", ")}` });
+  // « non_remis » : seul un administrateur peut fermer une vente sans remettre le ticket, et c'est journalisé
+  if (req.body.action === "non_remis" && req.user?.role !== "admin") return res.status(403).json({ erreur: "Seul un administrateur peut fermer une vente sans ticket" });
+  if (req.body.action !== "non_remis" && !ACTIONS_VENDEUR.includes(req.body.action)) return res.status(400).json({ erreur: `action doit être l'une de : ${ACTIONS_VENDEUR.join(", ")}` });
   db.transaction(() => journaliser(cmd.id, req.body.action, req.user?.id))();
   res.json(enrichir(lire(cmd.id)));
 });

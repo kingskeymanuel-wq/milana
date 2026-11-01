@@ -21,6 +21,7 @@ const ACTIONS = {
   lien: "Lien du ticket copié",
   consulte_client: "Ticket consulté par le client",
   historique: "Vente antérieure au suivi des tickets",
+  non_remis: "Vente fermée sans remise du ticket (administrateur)",
 };
 const REMISE = ["imprime", "pdf", "whatsapp", "sms", "email", "consulte_client", "historique"];
 const ACTIONS_VENDEUR = ["imprime", "pdf", "whatsapp", "lien"]; // déclarées par l'interface

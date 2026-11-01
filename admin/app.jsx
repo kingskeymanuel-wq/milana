@@ -1718,6 +1718,7 @@ function EnvoiTicketModal({ open, onClose, t, cmd, marquer }) {
 const ACTIONS_TICKET = {
   genere: "généré", imprime: "imprimé", pdf: "PDF", whatsapp: "WhatsApp", sms: "SMS", email: "e-mail",
   lien: "lien copié", consulte_client: "consulté par le client", historique: "vente antérieure",
+  non_remis: "fermé sans remise (administrateur)",
 };
 const REMISE_TICKET = new Set(["imprime", "pdf", "whatsapp", "sms", "email", "consulte_client", "historique"]);
 
@@ -1785,10 +1786,11 @@ function SaleModal({ open, preset, onClose }) {
     setPay(paiementVide()); setErr({}); setDone(null); setSaving(false); setApercu(false);
   };
   useEffect(() => { if (open) reinitialiser(); }, [open]);
-  // Nouvelle vente en une touche, même si le ticket n'est pas encore remis : il reste dans « Tickets »
-  const venteSuivante = (ticketRemis, numeroTicket) => {
-    if (!ticketRemis) toast({ title: `Ticket ${numeroTicket || ""} à remettre au client`, desc: "Retrouvez-le dans Tickets pour l'imprimer ou l'envoyer." });
-    reinitialiser(true);
+  // Traçabilité : pas de vente suivante tant que le ticket n'est pas remis ; l'administrateur peut passer outre, c'est journalisé
+  const fermerSansTicket = async (cmdId) => {
+    if (!confirm("Fermer cette vente sans remettre le ticket au client ? Ce sera inscrit à votre nom dans le journal des tickets.")) return;
+    const r = await sync(["POST", `/api/commandes/${cmdId}/ticket`, { action: "non_remis" }]);
+    if (r) { update((d) => ({ ...d, tickets: [...(d.tickets || []), { id: uid(), commandeId: cmdId, action: "non_remis", auteurId: d.moi || null, date: new Date().toISOString() }] })); onClose(); }
   };
 
   // Client reconnu à son numéro : on travaille avec le téléphone
@@ -1900,11 +1902,11 @@ function SaleModal({ open, preset, onClose }) {
             </div>
           )}
           <div className="row" style={{ flexWrap: "wrap", justifyContent: "center" }}>
-            <Btn variant="brand" size="lg" icon={Plus} onClick={() => venteSuivante(remis, cmdFinale?.numeroTicket)}>Nouvelle vente</Btn>
+            <Btn variant="brand" size="lg" icon={Plus} disabled={!remis} title={remis ? undefined : "Remettez d'abord le ticket au client"} onClick={() => reinitialiser(true)}>Nouvelle vente</Btn>
             <Btn disabled={!remis} onClick={() => { onClose(); go("commandes", done.cmdId); }}>Voir la commande</Btn>
             <Btn onClick={fermer} disabled={!remis}>Fermer</Btn>
           </div>
-          {!remis && estAdmin && <button type="button" className="link" style={{ marginTop: 8 }} onClick={onClose}>Fermer sans remettre le ticket (administrateur)</button>}
+          {!remis && estAdmin && <button type="button" className="link" style={{ marginTop: 8 }} onClick={() => fermerSansTicket(done.cmdId)}>Fermer sans remettre le ticket (administrateur, noté au journal)</button>}
         </div>
       </Modal>
     );
@@ -4134,7 +4136,7 @@ function PageTickets({ route }) {
                     <td className="right num strong">{fmt(c.total)}</td>
                     <td>{c.remis
                       ? <><Badge tone="success" dot>Remis</Badge><div className="cell-sub">{c.modes.filter((a) => REMISE_TICKET.has(a)).map((a) => ACTIONS_TICKET[a]).join(", ")}</div></>
-                      : c.statut === "annulee" ? <Badge>Annulée</Badge> : <Badge tone="critical" dot>Non remis</Badge>}</td>
+                      : c.statut === "annulee" ? <Badge>Annulée</Badge> : <><Badge tone="critical" dot>Non remis</Badge>{c.modes.includes("non_remis") && <div className="cell-sub">Vente fermée sans ticket par un administrateur</div>}</>}</td>
                   </tr>
                 ))}
               </tbody>
