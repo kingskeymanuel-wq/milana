@@ -1786,12 +1786,6 @@ function SaleModal({ open, preset, onClose }) {
     setPay(paiementVide()); setErr({}); setDone(null); setSaving(false); setApercu(false);
   };
   useEffect(() => { if (open) reinitialiser(); }, [open]);
-  // Traçabilité : pas de vente suivante tant que le ticket n'est pas remis ; l'administrateur peut passer outre, c'est journalisé
-  const fermerSansTicket = async (cmdId) => {
-    if (!confirm("Fermer cette vente sans remettre le ticket au client ? Ce sera inscrit à votre nom dans le journal des tickets.")) return;
-    const r = await sync(["POST", `/api/commandes/${cmdId}/ticket`, { action: "non_remis" }]);
-    if (r) { update((d) => ({ ...d, tickets: [...(d.tickets || []), { id: uid(), commandeId: cmdId, action: "non_remis", auteurId: d.moi || null, date: new Date().toISOString() }] })); onClose(); }
-  };
 
   // Client reconnu à son numéro : on travaille avec le téléphone
   const client = chiffres(c.tel).length >= 8 ? data.clients.find((x) => chiffres(x.tel) === chiffres(c.tel)) : null;
@@ -1880,9 +1874,10 @@ function SaleModal({ open, preset, onClose }) {
     const cmdFinale = enrichCommandes(data).find((x) => x.id === done.cmdId);
     const ticket = cmdFinale && construireTicket(data, cmdFinale, mode);
     const monnaie = cmdFinale?.vente?.montantRecu != null ? cmdFinale.vente.montantRecu - cmdFinale.total : 0;
-    // Pas de vente sans ticket : la fenêtre ne se ferme qu'une fois le ticket remis au client
+    // Traçabilité : toute vente passe par cet écran, où son ticket est déjà généré et journalisé ;
+    // l'imprimer ou l'envoyer au client est facultatif (les tickets non remis restent visibles dans « Tickets »)
     const remis = !!cmdFinale?.ticketRemisLe || !cmdFinale;
-    const fermer = () => { if (remis) onClose(); else toast({ title: "Remettez d'abord le ticket au client", desc: "Imprimez-le, téléchargez-le ou envoyez-le.", tone: "critical" }); };
+    const fermer = onClose;
     return (
       <Modal open={open} onClose={fermer} title="Vente enregistrée" size="md" hideHeader>
         <div className="success" style={{ position: "relative" }}>
@@ -1898,15 +1893,14 @@ function SaleModal({ open, preset, onClose }) {
               <ActionsTicket t={ticket} cmd={cmdFinale} />
               {remis
                 ? <div className="banner banner-success" style={{ marginTop: 10 }}><CheckCircle2 size={16} /><div>Ticket remis au client. La vente est terminée.</div></div>
-                : <div className="banner banner-warning" style={{ marginTop: 10 }}><AlertTriangle size={16} /><div><b>Remettez le ticket au client pour terminer la vente</b> : imprimez-le, téléchargez-le ou envoyez-le (WhatsApp, e-mail, SMS).</div></div>}
+                : <div className="banner banner-info" style={{ marginTop: 10 }}><Receipt size={16} /><div><b>Ticket {cmdFinale.numeroTicket} enregistré.</b> L'imprimer ou l'envoyer au client est facultatif ; il reste dans « Tickets ».</div></div>}
             </div>
           )}
           <div className="row" style={{ flexWrap: "wrap", justifyContent: "center" }}>
-            <Btn variant="brand" size="lg" icon={Plus} disabled={!remis} title={remis ? undefined : "Remettez d'abord le ticket au client"} onClick={() => reinitialiser(true)}>Nouvelle vente</Btn>
-            <Btn disabled={!remis} onClick={() => { onClose(); go("commandes", done.cmdId); }}>Voir la commande</Btn>
-            <Btn onClick={fermer} disabled={!remis}>Fermer</Btn>
+            <Btn variant="brand" size="lg" icon={Plus} onClick={() => reinitialiser(true)}>Nouvelle vente</Btn>
+            <Btn onClick={() => { onClose(); go("commandes", done.cmdId); }}>Voir la commande</Btn>
+            <Btn onClick={fermer}>Fermer</Btn>
           </div>
-          {!remis && estAdmin && <button type="button" className="link" style={{ marginTop: 8 }} onClick={() => fermerSansTicket(done.cmdId)}>Fermer sans remettre le ticket (administrateur, noté au journal)</button>}
         </div>
       </Modal>
     );
