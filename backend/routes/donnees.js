@@ -5,7 +5,7 @@ const { adminOnly } = require("../middleware/auth");
 const { clientsVisibles } = require("../lib/clients");
 const { versIso, idOuNouveau } = require("../lib/outils");
 const { lireBoutique, ecrireBoutique } = require("./parametres");
-const { resoudreImage } = require("../lib/images");
+const { resoudreImage, supprimerImage } = require("../lib/images");
 const { numeroterManquants } = require("../lib/tickets");
 const router = express.Router();
 
@@ -33,7 +33,7 @@ router.get("/", (req, res) => {
     role: req.user?.role,
     moi,
     espace: { id: espace.id, slug: espace.slug },
-    equipe: db.prepare("SELECT id, nom, telephone, role, actif, cree_le FROM utilisateurs ORDER BY role, cree_le").all()
+    equipe: db.prepare("SELECT id, nom, telephone, role, actif, cree_le FROM utilisateurs WHERE supprime = 0 ORDER BY role, cree_le").all()
       .filter((u) => admin || u.id === moi).map((u) => ({ ...u, cree_le: versIso(u.cree_le) })),
     // Un vendeur ne reçoit que ses propres clients
     clients: clientsVisibles(req.user, { ordre: "ASC" }).map((c) => ({ ...c, cree_le: versIso(c.cree_le) })),
@@ -165,6 +165,48 @@ router.post("/import", adminOnly, (req, res) => {
   }
 
   res.json({ message: "Données importées" });
+});
+
+/*
+ * Remise à zéro par l'administrateur, élément par élément, après confirmation de son mot de passe.
+ * L'interface télécharge d'abord une sauvegarde ; chaque remise est inscrite au journal (jamais effacé).
+ * Les comptes, les réglages de la boutique et les livreurs ne sont jamais touchés.
+ */
+const ELEMENTS_REMISE = {
+  ventes: { libelle: "ventes, commandes et tickets", tables: ["ventes", "commandes", "commande_evenements", "tickets_journal", "mouvements_stock", "retours", "reglements_retour", "paiements_en_ligne", "caisse_sessions", "caisse_remises", "livraison_positions", "releves_mm", "releves_mm_imports"] },
+  produits: { libelle: "produits", tables: ["packs"] },
+  clients: { libelle: "clients", tables: ["clients", "messages_entrants", "campagne_envois"] },
+  capital: { libelle: "capital investi", tables: ["investissements"] },
+  depenses: { libelle: "dépenses", tables: ["depenses"] },
+};
+const tableExiste = (t) => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t));
+
+// GET /api/donnees/journal-admin — dernières actions sensibles (remises à zéro, vendeurs supprimés)
+router.get("/journal-admin", adminOnly, (req, res) => {
+  const noms = new Map(db.prepare("SELECT id, nom FROM utilisateurs").all().map((u) => [u.id, u.nom]));
+  res.json(db.prepare("SELECT * FROM journal_admin ORDER BY cree_le DESC LIMIT 30").all().map((j) => ({ ...j, auteur: noms.get(j.auteur_id) || null })));
+});
+
+// POST /api/donnees/remise-a-zero — { mot_de_passe, elements: ["ventes", "produits", "clients", "capital", "depenses"] }
+router.post("/remise-a-zero", adminOnly, (req, res) => {
+  const elements = [...new Set(Array.isArray(req.body.elements) ? req.body.elements : [])].filter((e) => ELEMENTS_REMISE[e]);
+  if (!elements.length) return res.status(400).json({ erreur: "Choisissez au moins un élément à remettre à zéro" });
+  const moi = db.prepare("SELECT mot_de_passe FROM utilisateurs WHERE id = ?").get(req.user.id);
+  if (!moi || !require("bcryptjs").compareSync(String(req.body.mot_de_passe || ""), moi.mot_de_passe)) return res.status(401).json({ erreur: "Mot de passe incorrect" });
+  const photos = elements.includes("produits") ? db.prepare("SELECT image FROM packs WHERE image IS NOT NULL").all().map((p) => p.image) : [];
+  const comptes = {};
+  db.transaction(() => {
+    for (const e of elements) {
+      comptes[e] = 0;
+      for (const t of ELEMENTS_REMISE[e].tables.filter(tableExiste)) comptes[e] += db.prepare(`DELETE FROM ${t}`).run().changes;
+    }
+    // Ventes effacées : la numérotation des tickets repart de T-000001 (et celle des commandes de #1001)
+    if (elements.includes("ventes")) db.prepare("DELETE FROM parametres WHERE cle = 'ticket_compteur'").run();
+    db.prepare("INSERT INTO journal_admin (id, action, detail, auteur_id, cree_le) VALUES (?, 'remise_a_zero', ?, ?, ?)")
+      .run(nanoid(), elements.map((e) => ELEMENTS_REMISE[e].libelle).join(", "), req.user.id, new Date().toISOString());
+  })();
+  for (const p of photos) supprimerImage(p);
+  res.json({ remis_a_zero: elements, lignes: comptes });
 });
 
 module.exports = router;

@@ -207,7 +207,7 @@ router.get("/moi", authRequired, (req, res) => {
 /* ------------------------------------------------------------ équipe de l'espace */
 
 router.get("/equipe", authRequired, adminOnly, (req, res) => {
-  res.json(db.prepare("SELECT id, nom, telephone, email, role, actif, cree_le FROM utilisateurs ORDER BY role, cree_le").all().map((u) => ({ ...profil(u), cree_le: u.cree_le })));
+  res.json(db.prepare("SELECT id, nom, telephone, email, role, actif, cree_le FROM utilisateurs WHERE supprime = 0 ORDER BY role, cree_le").all().map((u) => ({ ...profil(u), cree_le: u.cree_le })));
 });
 
 router.patch("/equipe/:id", authRequired, adminOnly, (req, res) => {
@@ -223,6 +223,24 @@ router.patch("/equipe/:id", authRequired, adminOnly, (req, res) => {
     db.prepare("UPDATE utilisateurs SET mot_de_passe = ? WHERE id = ?").run(bcrypt.hashSync(String(req.body.mot_de_passe), 10), u.id);
   }
   res.json(profil(db.prepare("SELECT * FROM utilisateurs WHERE id = ?").get(u.id)));
+});
+
+// DELETE /api/auth/equipe/:id — (admin) supprime un vendeur. Sans vente : compte effacé.
+// Avec des ventes : compte fermé et numéro libéré, son nom reste sur ses ventes (traçabilité). Inscrit au journal.
+router.delete("/equipe/:id", authRequired, adminOnly, (req, res) => {
+  const u = db.prepare("SELECT * FROM utilisateurs WHERE id = ? AND supprime = 0").get(req.params.id);
+  if (!u) return res.status(404).json({ erreur: "Compte introuvable" });
+  if (u.id === req.user.id) return res.status(400).json({ erreur: "Vous ne pouvez pas supprimer votre propre compte" });
+  if (u.role === "admin") return res.status(400).json({ erreur: "Un administrateur ne se supprime pas ici : désactivez-le" });
+  const ventes = db.prepare("SELECT COUNT(*) AS n FROM ventes WHERE vendeur_id = ?").get(u.id).n;
+  db.transaction(() => {
+    if (ventes) db.prepare("UPDATE utilisateurs SET actif = 0, supprime = 1, telephone = ? WHERE id = ?").run(`${u.telephone}#supprime-${u.id}`, u.id);
+    else db.prepare("DELETE FROM utilisateurs WHERE id = ?").run(u.id);
+    db.prepare("INSERT INTO journal_admin (id, action, detail, auteur_id, cree_le) VALUES (?, 'vendeur_supprime', ?, ?, ?)")
+      .run(nanoid(), `${u.nom} (${u.telephone})${ventes ? ` — ${ventes} vente(s) gardée(s) à son nom` : ""}`, req.user.id, new Date().toISOString());
+  })();
+  db.comptes.retirer(u.telephone);
+  res.json({ supprime: true, ventes_gardees: ventes });
 });
 
 module.exports = router;

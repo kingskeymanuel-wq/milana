@@ -119,6 +119,11 @@ function ouvrirEspace(fichier) {
 
   // v6 : un vendeur peut être désactivé par son administrateur (son historique est conservé)
   ajouterColonne("utilisateurs", "actif", "INTEGER NOT NULL DEFAULT 1");
+  // Vendeur supprimé qui avait vendu : compte fermé, numéro libéré, nom gardé pour l'historique des ventes
+  ajouterColonne("utilisateurs", "supprime", "INTEGER NOT NULL DEFAULT 0");
+  // Journal des actions sensibles de l'administrateur (remises à zéro, suppressions de vendeurs) : jamais effacé
+  db.exec(`CREATE TABLE IF NOT EXISTS journal_admin (
+    id TEXT PRIMARY KEY, action TEXT NOT NULL, detail TEXT, auteur_id TEXT, cree_le TEXT NOT NULL)`);
 
   // v7 : catégories et lots, tickets de caisse numérotés et suivis, ventes B2B
   ajouterColonne("packs", "categorie", "TEXT");

@@ -3869,6 +3869,11 @@ function PageVendeurs() {
     try { await apiFetch("PATCH", `/api/auth/equipe/${u.id}`, { actif: !u.actif }); toast({ title: u.actif ? `${u.nom} est désactivé` : `${u.nom} est réactivé` }); rafraichir(); }
     catch (e) { toast({ title: "Modification impossible", desc: e.message, tone: "critical" }); }
   };
+  const supprimer = async (u) => {
+    if (!(await confirm({ title: `Supprimer ${u.nom} ?`, message: "Son compte est supprimé et son numéro libéré. S'il a déjà vendu, son nom reste sur ses anciennes ventes et tickets. C'est inscrit au journal.", confirmLabel: "Supprimer", tone: "critical" }))) return;
+    try { const r = await apiFetch("DELETE", `/api/auth/equipe/${u.id}`); toast({ title: `${u.nom} est supprimé`, desc: r.ventes_gardees ? `${r.ventes_gardees} vente(s) gardée(s) à son nom` : undefined }); rafraichir(); }
+    catch (e) { toast({ title: "Suppression impossible", desc: e.message, tone: "critical" }); }
+  };
   const copierLien = (u) => navigator.clipboard?.writeText(lienBoutique(data, u.id)).then(() => toast({ title: "Lien de promotion copié", desc: `Lien de ${u.nom}` }), () => toast({ title: "Copie impossible", tone: "critical" }));
 
   const kpis = [
@@ -3890,6 +3895,7 @@ function PageVendeurs() {
           <button className="icon-btn" title="Copier son lien de promotion" aria-label={`Copier le lien de ${u.nom}`} onClick={() => copierLien(u)}><Link2 size={15} /></button>
           {u.id !== data.moi && <button className="icon-btn" title="Changer son mot de passe" aria-label={`Mot de passe de ${u.nom}`} onClick={() => setMdp(u)}><KeyRound size={15} /></button>}
           {u.id !== data.moi && <button className={cx("icon-btn", u.actif && "danger")} title={u.actif ? "Désactiver" : "Réactiver"} aria-label={u.actif ? `Désactiver ${u.nom}` : `Réactiver ${u.nom}`} onClick={() => basculer(u)}>{u.actif ? <XCircle size={15} /> : <RotateCcw size={15} />}</button>}
+          {u.id !== data.moi && u.role === "vendeur" && <button className="icon-btn danger" title="Supprimer ce vendeur" aria-label={`Supprimer ${u.nom}`} onClick={() => supprimer(u)}><Trash2 size={15} /></button>}
         </span></td>
       </tr>
     );
@@ -5817,7 +5823,8 @@ function PageRapport({ mois: moisRoute }) {
 }
 
 function PageFinances({ route }) {
-  const { data, update, sync, go, toast, confirm } = useApp();
+  const { data, update, sync, go, toast, confirm, mode, auth } = useApp();
+  const [remiseCapital, setRemiseCapital] = useState(false);
   const [periode, setPeriode] = useState("mois");
   const [editing, setEditing] = useState(null);
   const T0 = today();
@@ -5986,8 +5993,9 @@ function PageFinances({ route }) {
 
       <CarteSeuil />
 
+      <RemiseAZeroModal open={remiseCapital} onClose={() => setRemiseCapital(false)} choix={["capital"]} />
       <Card title="Investissements" sub="Capital engagé dans la boutique (stock de départ, matériel, travaux…), récupéré au fil des bénéfices" style={{ marginTop: 16 }} padded={false}
-        actions={<Btn variant="primary" icon={Plus} onClick={() => go("finances", "nouveau")}>Ajouter</Btn>}>
+        actions={<>{mode === "api" && auth?.utilisateur?.role === "admin" && data.investissements.length > 0 && <Btn variant="critical-plain" icon={RotateCcw} onClick={() => setRemiseCapital(true)}>Remettre à zéro</Btn>}<Btn variant="primary" icon={Plus} onClick={() => go("finances", "nouveau")}>Ajouter</Btn></>}>
         {invest > 0 && (
           <div style={{ padding: "12px 16px 0" }}>
             <div className="row-between"><span className="subtle">Récupéré par les bénéfices</span><b className="num">{fmt(Math.max(0, benefTotal))} / {fmt(invest)}</b></div>
@@ -6193,12 +6201,63 @@ function MesMoyensPaiement() {
   );
 }
 
+/* Remise à zéro par l'administrateur : il choisit quoi effacer, confirme avec son mot de passe ;
+   une sauvegarde est téléchargée avant, et la remise est inscrite au journal (jamais effacé). */
+const ELEMENTS_REMISE = [
+  ["ventes", "Ventes, commandes et tickets", "Chiffre d'affaires à 0, tickets à partir de T-000001"],
+  ["produits", "Produits", "Le catalogue et les photos des produits"],
+  ["clients", "Clients", "Le fichier clients"],
+  ["capital", "Capital investi", "Tous les investissements notés"],
+  ["depenses", "Dépenses", "Toutes les dépenses notées"],
+];
+function RemiseAZeroModal({ open, onClose, choix = [] }) {
+  const { data, toast, rafraichir } = useApp();
+  const [elements, setElements] = useState([]);
+  const [mdp, setMdp] = useState("");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [journal, setJournal] = useState([]);
+  useEffect(() => {
+    if (!open) return;
+    setElements(choix); setMdp(""); setErr(""); setBusy(false);
+    apiFetch("GET", "/api/donnees/journal-admin").then(setJournal).catch(() => setJournal([]));
+  }, [open]);
+  const basculer = (k, oui) => setElements((l) => (oui ? [...new Set([...l, k])] : l.filter((x) => x !== k)));
+  const valider = async () => {
+    if (!elements.length) return setErr("Choisissez au moins un élément.");
+    if (!mdp) return setErr("Entrez votre mot de passe pour confirmer.");
+    setBusy(true); setErr("");
+    downloadFile(`sauvegarde-avant-remise-${isoDate(new Date())}.json`, JSON.stringify(data, null, 2), "application/json");
+    try {
+      await apiFetch("POST", "/api/donnees/remise-a-zero", { mot_de_passe: mdp, elements });
+      toast({ title: "Remise à zéro effectuée", desc: "Une sauvegarde a été téléchargée juste avant." });
+      await rafraichir(); onClose();
+    } catch (e) { setErr(e.message); setBusy(false); }
+  };
+  return (
+    <Modal open={open} onClose={onClose} title="Remettre à zéro" size="sm"
+      footer={<><Btn onClick={onClose}>Annuler</Btn><Btn variant="critical" icon={RotateCcw} loading={busy} onClick={valider}>Remettre à zéro</Btn></>}>
+      <div className="stack-sm">
+        <p className="subtle">Cochez ce qui doit repartir de zéro. Vos comptes, vos vendeurs, vos livreurs et les réglages de la boutique sont gardés.</p>
+        <div className="remise-choix">{ELEMENTS_REMISE.map(([k, titre, detail]) => (
+          <div key={k} className="remise-ligne"><Checkbox checked={elements.includes(k)} onChange={(oui) => basculer(k, oui)} label={<span><b>{titre}</b><small>{detail}</small></span>} /></div>
+        ))}</div>
+        <Field label="Votre mot de passe" help="Une sauvegarde (.json) est téléchargée juste avant, et la remise est inscrite au journal."><Input icon={Lock} type="password" value={mdp} onChange={(e) => { setMdp(e.target.value); setErr(""); }} autoComplete="current-password" /></Field>
+        {err && <div className="banner banner-critical"><AlertCircle size={16} />{err}</div>}
+        {journal.length > 0 && <details className="journal-admin"><summary>Journal des remises à zéro et suppressions</summary>
+          <ul>{journal.map((j) => <li key={j.id}><b>{j.action === "remise_a_zero" ? "Remise à zéro" : "Vendeur supprimé"}</b> : {j.detail}<small>{fmtDateTime(j.cree_le)}{j.auteur ? ` · par ${j.auteur}` : ""}</small></li>)}</ul></details>}
+      </div>
+    </Modal>
+  );
+}
+
 function PageParametres() {
   const { settings, setSettings, data, update, sync, remplacerTout, toast, confirm, logout, auth, mode, go } = useApp();
   const enLigne = mode === "api";
   const estAdmin = !enLigne || auth?.utilisateur?.role === "admin";
   const localDispo = enLigne && !!readJson(STORAGE_KEY);
   const [equipeOpen, setEquipeOpen] = useState(false);
+  const [remiseOpen, setRemiseOpen] = useState(false);
   const [boutique, setBoutique] = useState(() => ({ ...boutiqueParDefaut(), ...(data.boutique || {}) }));
   useEffect(() => { setBoutique({ ...boutiqueParDefaut(), ...(data.boutique || {}) }); }, [JSON.stringify(data.boutique)]);
   const setB = (k, v) => setBoutique((b) => ({ ...b, [k]: v }));
@@ -6301,9 +6360,11 @@ function PageParametres() {
               <Btn icon={Upload} onClick={() => fileRef.current?.click()}>Importer</Btn>
             </Row>
             {localDispo && <Row title="Données de ce navigateur" sub="Envoie sur le serveur les données saisies en mode démo."><Btn icon={Upload} onClick={envoyerLocal}>Envoyer vers le serveur</Btn></Row>}
+            {enLigne && <Row title="Remettre à zéro" sub="Ventes et tickets, produits, clients, capital investi ou dépenses : vous choisissez."><Btn variant="critical-plain" icon={RotateCcw} onClick={() => setRemiseOpen(true)}>Remettre à zéro</Btn></Row>}
             <Row title="Données de démonstration" sub="Recharge un jeu de données d'exemple."><Btn variant="critical-plain" icon={RotateCcw} onClick={reset}>Réinitialiser</Btn></Row>
           </> : <Row title="Restauration et réinitialisation" sub="Réservées aux administrateurs." />}
         </Card>
+        {enLigne && estAdmin && <RemiseAZeroModal open={remiseOpen} onClose={() => setRemiseOpen(false)} />}
         <Card title="Compte" padded={false}>
           <Row title={auth?.utilisateur?.nom || "Connecté"} sub={[auth?.tel && `Téléphone : ${auth.tel}`, auth?.utilisateur?.role && (auth.utilisateur.role === "admin" ? "Administrateur" : "Vendeur")].filter(Boolean).join(" · ") || null}><Btn icon={LogOut} onClick={logout}>Se déconnecter</Btn></Row>
         </Card>
