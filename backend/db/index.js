@@ -209,6 +209,23 @@ plateforme.exec(`
     telephone    TEXT PRIMARY KEY,     -- un numéro = un compte sur toute la plateforme
     boutique_id  TEXT NOT NULL REFERENCES boutiques(id) ON DELETE CASCADE
   );
+  -- Demandes d'accès au portail administrateur : un code personnel (6 chiffres, 48 h, une seule fois)
+  -- est remis au numéro qui demande ; MANU dev lit cette table pour prévenir le propriétaire.
+  CREATE TABLE IF NOT EXISTS demandes_acces (
+    id             TEXT PRIMARY KEY,
+    nom            TEXT NOT NULL,
+    telephone      TEXT NOT NULL,
+    boutique       TEXT NOT NULL,
+    code_empreinte TEXT NOT NULL,      -- SHA-256 du code, jamais le code lui-même
+    envoi          TEXT NOT NULL,      -- sms | simule (aucun fournisseur : code affiché à l'écran) | echec
+    essais         INTEGER NOT NULL DEFAULT 0,
+    cree_le        TEXT NOT NULL,
+    expire_le      TEXT NOT NULL,
+    valide_le      TEXT,               -- code vérifié sur l'écran de validation
+    utilise_le     TEXT,               -- espace créé avec ce code
+    boutique_id    TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_demandes_tel ON demandes_acces(telephone, cree_le);
 `);
 
 const ouvertes = new Map(); // id de boutique → connexion
@@ -300,7 +317,20 @@ const reglages = {
   ecrire: (cle, valeur) => plateforme.prepare("INSERT INTO reglages (cle, valeur) VALUES (?, ?) ON CONFLICT(cle) DO UPDATE SET valeur = excluded.valeur").run(cle, String(valeur)),
 };
 
-const outils = { reglages, dansEspace, espaceCourant, listerBoutiques, boutiqueParRef, pourChaqueEspace, trouverEspace, creerBoutique, comptes };
+const demandesAcces = {
+  creer: (d) => plateforme.prepare(`INSERT INTO demandes_acces (id, nom, telephone, boutique, code_empreinte, envoi, cree_le, expire_le)
+    VALUES (@id, @nom, @telephone, @boutique, @code_empreinte, @envoi, @cree_le, @expire_le)`).run(d),
+  lire: (id) => plateforme.prepare("SELECT * FROM demandes_acces WHERE id = ?").get(String(id)) || null,
+  recentes: (telephone, depuis) => plateforme.prepare("SELECT COUNT(*) AS n FROM demandes_acces WHERE telephone = ? AND cree_le >= ?").get(String(telephone), depuis).n,
+  /** Demande encore utilisable de ce numéro pour ce code (non expirée, pas encore utilisée). */
+  valide: (telephone, empreinte, maintenant) => plateforme.prepare(`SELECT * FROM demandes_acces WHERE telephone = ? AND code_empreinte = ? AND utilise_le IS NULL AND expire_le > ?
+    ORDER BY cree_le DESC LIMIT 1`).get(String(telephone), empreinte, maintenant) || null,
+  noterEssai: (id) => plateforme.prepare("UPDATE demandes_acces SET essais = essais + 1 WHERE id = ?").run(id),
+  marquerValidee: (id, date) => plateforme.prepare("UPDATE demandes_acces SET valide_le = COALESCE(valide_le, ?) WHERE id = ?").run(date, id),
+  marquerUtilisee: (id, boutiqueId, date) => plateforme.prepare("UPDATE demandes_acces SET utilise_le = ?, boutique_id = ?, valide_le = COALESCE(valide_le, ?) WHERE id = ?").run(date, boutiqueId, date, id),
+};
+
+const outils = { reglages, dansEspace, espaceCourant, listerBoutiques, boutiqueParRef, pourChaqueEspace, trouverEspace, creerBoutique, comptes, demandesAcces };
 
 module.exports = new Proxy(outils, {
   get(cible, prop) {

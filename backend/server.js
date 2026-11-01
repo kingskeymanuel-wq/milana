@@ -77,10 +77,12 @@ app.use("/api", (req, res, next) => {
 });
 // Plus strict sur la connexion et l'inscription (force brute sur les mots de passe)
 app.use(
-  ["/api/auth/connexion", "/api/auth/inscription"],
+  ["/api/auth/connexion", "/api/auth/inscription", "/api/auth/demande-acces"],
   rateLimit({ windowMs: 15 * 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false, message: { erreur: "Trop de tentatives, réessayez dans quelques minutes." } })
 );
 
+// Demandes d'accès : chacune envoie un SMS payant, donc 6 par heure et par connexion au plus
+app.post("/api/auth/demande-acces", rateLimit({ windowMs: 60 * 60 * 1000, max: 6, standardHeaders: true, legacyHeaders: false, message: { erreur: "Trop de demandes d'accès depuis cette connexion : réessayez dans une heure." } }));
 app.get("/api/sante", (req, res) => res.json({ statut: "ok", service: "MILANA API" }));
 
 // Authentification — publique

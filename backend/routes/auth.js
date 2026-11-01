@@ -19,7 +19,8 @@ const bcrypt = require("bcryptjs");
 const { nanoid } = require("nanoid");
 const db = require("../db");
 const { signToken, authRequired, adminOnly } = require("../middleware/auth");
-const { normTel } = require("../lib/outils");
+const { normTel, urlPublique } = require("../lib/outils");
+const { envoyerSms } = require("../lib/sms");
 const { lireBoutique, ecrireBoutique } = require("./parametres");
 
 const router = express.Router();
@@ -91,6 +92,51 @@ function codeValide(code) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
+/*
+ * Demande d'accès : la personne donne son nom, son numéro et sa boutique ; un code personnel
+ * (6 chiffres, 48 h, une seule fois, lié à ce numéro) part aussitôt par SMS. Sans fournisseur SMS
+ * réglé, le code est affiché sur l'écran de la demande pour qu'elle puisse continuer.
+ * MANU dev lit les demandes dans la base de la plateforme et prévient le propriétaire.
+ */
+const PLATEFORME = process.env.NOM_PLATEFORME || "MILANA";
+const DUREE_CODE_MS = 48 * 3600 * 1000;
+const empreinteCode = (code) => crypto.createHash("sha256").update("acces|" + String(code).replace(/\D/g, "")).digest("hex");
+const demandeAccesValide = (telephone, code) => (code ? db.demandesAcces.valide(telephone, empreinteCode(code), new Date().toISOString()) : null);
+
+router.post("/demande-acces", async (req, res) => {
+  const nom = String(req.body.nom || "").trim().slice(0, 80);
+  const boutique = String(req.body.boutique || "").trim().slice(0, 80);
+  const telephone = normTel(req.body.telephone);
+  if (nom.length < 2 || boutique.length < 2) return res.status(400).json({ erreur: "Indiquez votre nom et le nom de votre boutique." });
+  if (!telephone || telephone.replace(/\D/g, "").length < 8) return res.status(400).json({ erreur: "Numéro de téléphone invalide." });
+  if (db.comptes.boutiqueDe(telephone)) return res.status(409).json({ erreur: "Un compte existe déjà avec ce numéro : connectez-vous." });
+  if (db.demandesAcces.recentes(telephone, new Date(Date.now() - 24 * 3600 * 1000).toISOString()) >= 3) return res.status(429).json({ erreur: "Trois demandes déjà faites aujourd'hui pour ce numéro : réessayez demain." });
+  const code = String(crypto.randomInt(0, 1e6)).padStart(6, "0");
+  const maintenant = new Date();
+  // Dernière ligne « @domaine #code » : le téléphone (Android) peut remplir le code tout seul
+  let envoi = "simule";
+  try {
+    const hote = new URL(urlPublique(req)).hostname;
+    const r = await envoyerSms(telephone, `${PLATEFORME} : votre code d'accès administrateur est ${code}. Valable 48 h, pour ce numéro seulement.\n\n@${hote} #${code}`);
+    envoi = r?.simule ? "simule" : "sms";
+  } catch (e) { envoi = "echec"; console.error("Demande d'accès, SMS :", e.message); }
+  const id = nanoid(12);
+  db.demandesAcces.creer({ id, nom, telephone, boutique, code_empreinte: empreinteCode(code), envoi, cree_le: maintenant.toISOString(), expire_le: new Date(maintenant.getTime() + DUREE_CODE_MS).toISOString() });
+  res.status(201).json({ id, envoi, telephone, expire_le: new Date(maintenant.getTime() + DUREE_CODE_MS).toISOString(), ...(envoi === "sms" ? {} : { code }) });
+});
+
+router.post("/demande-acces/:id/verifier", (req, res) => {
+  const d = db.demandesAcces.lire(req.params.id);
+  if (!d) return res.status(404).json({ erreur: "Demande introuvable : refaites une demande d'accès." });
+  if (d.utilise_le) return res.status(409).json({ erreur: "Ce code a déjà servi : connectez-vous." });
+  if (d.expire_le < new Date().toISOString()) return res.status(410).json({ erreur: "Ce code a expiré : refaites une demande d'accès." });
+  if (d.essais >= 5) return res.status(429).json({ erreur: "Trop d'essais : refaites une demande d'accès." });
+  const a = Buffer.from(empreinteCode(req.body.code || "")), b = Buffer.from(d.code_empreinte);
+  if (!crypto.timingSafeEqual(a, b)) { db.demandesAcces.noterEssai(d.id); return res.status(400).json({ erreur: `Code incorrect (${4 - d.essais} essai${4 - d.essais > 1 ? "s" : ""} restant${4 - d.essais > 1 ? "s" : ""}).` }); }
+  db.demandesAcces.marquerValidee(d.id, new Date().toISOString());
+  res.json({ valide: true, nom: d.nom, telephone: d.telephone, boutique: d.boutique });
+});
+
 router.get("/etat", (req, res) => {
   // comptes_test : comptes de démonstration proposés sur l'écran de connexion (vide si DONNEES_TEST=0)
   res.json({ inscription_ouverte: true, code_invitation: Boolean(CODE_INVITATION), espaces: db.listerBoutiques().length, comptes_test: donneesTest.comptesTest() });
@@ -111,10 +157,13 @@ router.post("/inscription", (req, res, next) => {
   // Avec une session : l'administrateur ajoute un membre à son espace
   if (req.headers.authorization) return authRequired(req, res, () => adminOnly(req, res, next));
   // Sans session : création d'un nouvel espace administrateur
-  if (!codeValide(req.body.code_invitation)) return res.status(403).json({ erreur: "Code d'invitation incorrect." });
+  // Code d'invitation du site, ou code personnel reçu par demande d'accès pour CE numéro
+  const demande = demandeAccesValide(normTel(req.body.telephone), req.body.code_invitation);
+  if (!demande && !codeValide(req.body.code_invitation)) return res.status(403).json({ erreur: "Code d'accès incorrect ou expiré." });
   const v = validerCompte(req.body);
   if (v.erreur) return res.status(v.statut || 400).json({ erreur: v.erreur });
   const { boutique, utilisateur } = creerEspace({ ...v.compte, boutique: req.body.boutique });
+  if (demande) db.demandesAcces.marquerUtilisee(demande.id, boutique.id, new Date().toISOString());
   db.dansEspace(boutique.id, () => {
     res.status(201).json({ message: "Espace créé", utilisateur: profil(utilisateur), boutique: ficheBoutique(), jeton: signToken(utilisateur, boutique.id) });
   });

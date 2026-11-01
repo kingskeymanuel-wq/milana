@@ -6350,7 +6350,9 @@ function AuthScreen({ onSuccess, mode }) {
   // « Mon espace » de la page d'accueil : ?espace=vendeur | admin, ?creer=1 pour ouvrir un nouvel espace
   const params = new URLSearchParams(location.search);
   const espace = params.get("espace") === "vendeur" ? "vendeur" : "admin";
-  const [etape, setEtape] = useState(enLigne && params.get("creer") ? "inscription" : "connexion"); // inscription | connexion
+  const [etape, setEtape] = useState(enLigne && params.get("creer") ? "inscription" : "connexion"); // inscription | connexion | demande | validation
+  const [demande, setDemande] = useState(null); // demande d'accès envoyée : { id, envoi, telephone, code? }
+  const [accesValide, setAccesValide] = useState(false); // code personnel vérifié : il remplace le code d'invitation
   const [nom, setNom] = useState("");
   const [boutique, setBoutique] = useState("");
   const [tel, setTel] = useState("");
@@ -6372,6 +6374,38 @@ function AuthScreen({ onSuccess, mode }) {
   const fail = (m) => { setErreur(m); setErrKey((k) => k + 1); };
   const inscription = etape === "inscription";
   const changer = (e) => { setEtape(e); setErreur(""); };
+
+  // Demande d'accès : le code personnel part par SMS ; sans fournisseur SMS, le serveur le renvoie et il s'affiche ici
+  const demanderAcces = async (e) => {
+    e.preventDefault();
+    setErreur("");
+    if (!nom.trim()) return fail("Indiquez votre nom.");
+    if (boutique.trim().length < 2) return fail("Indiquez le nom de votre boutique.");
+    if (tel.replace(/\D/g, "").length < 8) return fail("Entrez un numéro de téléphone valide.");
+    setBusy(true);
+    try {
+      const r = await apiFetch("POST", "/api/auth/demande-acces", { nom: nom.trim(), boutique: boutique.trim(), telephone: tel });
+      setDemande(r); setCode(r.code || ""); setBusy(false); changer("validation");
+    } catch (err) { setBusy(false); fail(err.message); }
+  };
+  // Code reçu par SMS sur ce téléphone : rempli tout seul (navigateurs Android)
+  useEffect(() => {
+    if (etape !== "validation" || demande?.code || !("OTPCredential" in window)) return;
+    const arret = new AbortController();
+    navigator.credentials.get({ otp: { transport: ["sms"] }, signal: arret.signal }).then((o) => o?.code && setCode(o.code)).catch(() => {});
+    return () => arret.abort();
+  }, [etape, demande]);
+  const validerAcces = async (e) => {
+    e.preventDefault();
+    setErreur("");
+    if (code.replace(/\D/g, "").length !== 6) return fail("Le code d'accès a 6 chiffres.");
+    setBusy(true);
+    try {
+      const r = await apiFetch("POST", `/api/auth/demande-acces/${demande.id}/verifier`, { code });
+      setNom(r.nom); setBoutique(r.boutique); setTel(r.telephone); setAccesValide(true); setBusy(false); changer("inscription");
+    } catch (err) { setBusy(false); fail(err.message); }
+  };
+
 
   // Compte de démonstration : connexion directe
   const entrer = async (c) => {
@@ -6442,6 +6476,27 @@ function AuthScreen({ onSuccess, mode }) {
         <div className="card auth-card">
           <div className="card-body">
             <div className="auth-logo"><span className="brand-mark"><ShoppingBag size={16} strokeWidth={2.4} /></span>MILANA</div>
+            {etape === "demande" ? (
+              <form onSubmit={demanderAcces} className="stack" key={etape} style={{ animation: "fadeUp .35s var(--ease-out)" }}>
+                <div><h2>Demande d'accès</h2><p className="muted" style={{ marginTop: 4 }}>Vous recevez aussitôt votre code d'accès personnel par SMS, puis vous créez votre espace administrateur.</p></div>
+                <Field label="Votre nom"><Input size="lg" icon={User} value={nom} onChange={(e) => setNom(e.target.value)} placeholder="Ex : Aïcha Koné" autoComplete="name" autoFocus /></Field>
+                <Field label="Nom de votre boutique"><Input size="lg" icon={Store} value={boutique} onChange={(e) => setBoutique(e.target.value)} placeholder="Ex : Aïcha Mode" autoComplete="organization" /></Field>
+                <Field label="Numéro de téléphone" help="Le code d'accès est envoyé à ce numéro."><Input size="lg" icon={Phone} value={tel} onChange={(e) => setTel(e.target.value)} placeholder="07 00 00 00 00" inputMode="tel" autoComplete="tel" /></Field>
+                {erreur && <div className="banner banner-critical" key={errKey}><AlertCircle size={16} />{erreur}</div>}
+                <Btn type="submit" variant="primary" size="lg" full icon={Send} loading={busy}>Envoyer ma demande</Btn>
+                <p className="subtle" style={{ textAlign: "center" }}>Déjà un compte ? <button type="button" className="link" onClick={() => changer("connexion")}>Se connecter</button></p>
+              </form>
+            ) : etape === "validation" ? (
+              <form onSubmit={validerAcces} className="stack" key={etape} style={{ animation: "fadeUp .35s var(--ease-out)" }}>
+                <div><h2>Validation d'accès</h2><p className="muted" style={{ marginTop: 4 }}>{demande?.code
+                  ? <>Votre code d'accès personnel s'affiche ci-dessous. Il est valable 48 h, pour le {demande.telephone} seulement.</>
+                  : <>Code envoyé par SMS au <b>{demande?.telephone}</b>. Il se remplit tout seul à son arrivée sur ce téléphone ; sinon, recopiez-le.</>}</p></div>
+                <Field label="Code d'accès"><Input size="lg" icon={ShieldCheck} value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))} inputMode="numeric" autoComplete="one-time-code" placeholder="6 chiffres" autoFocus className="code-acces-input" /></Field>
+                {erreur && <div className="banner banner-critical" key={errKey}><AlertCircle size={16} />{erreur}</div>}
+                <Btn type="submit" variant="primary" size="lg" full icon={CheckCircle2} loading={busy}>Valider l'accès</Btn>
+                <p className="subtle" style={{ textAlign: "center" }}>Pas de code ? <button type="button" className="link" onClick={() => { setCode(""); changer("demande"); }}>Refaire la demande</button></p>
+              </form>
+            ) : (
             <form onSubmit={valider} className="stack" key={etape} style={{ animation: "fadeUp .35s var(--ease-out)" }}>
               {inscription ? (
                 <>
@@ -6464,12 +6519,16 @@ function AuthScreen({ onSuccess, mode }) {
                 </div>
               </Field>
               {inscription && <Field label="Confirmez le mot de passe" help="6 caractères minimum."><Input size="lg" icon={Lock} type={voir ? "text" : "password"} value={mdp2} onChange={(e) => setMdp2(e.target.value)} placeholder="••••••••" autoComplete="new-password" /></Field>}
-              {inscription && codeRequis && <Field label="Code d'invitation" help="Remis par le responsable de la plateforme."><Input size="lg" icon={ShieldCheck} value={code} onChange={(e) => setCode(e.target.value)} autoComplete="off" /></Field>}
+              {inscription && accesValide && <div className="banner banner-success"><CheckCircle2 size={16} /><div>Accès validé pour le {tel}. Choisissez votre mot de passe pour créer votre espace.</div></div>}
+              {inscription && codeRequis && !accesValide && <Field label="Code d'invitation" help={<>Remis par le responsable de la plateforme. Pas de code ? <button type="button" className="link" onClick={() => changer("demande")}>Faire une demande d'accès</button></>}><Input size="lg" icon={ShieldCheck} value={code} onChange={(e) => setCode(e.target.value)} autoComplete="off" /></Field>}
               {erreur && <div className="banner banner-critical" key={errKey}><AlertCircle size={16} />{erreur}</div>}
               <Btn type="submit" variant="primary" size="lg" full loading={busy}>{inscription ? "Créer mon espace" : "Se connecter"}</Btn>
               {enLigne && (inscription
                 ? <p className="subtle" style={{ textAlign: "center" }}>Déjà un compte ? <button type="button" className="link" onClick={() => changer("connexion")}>Se connecter</button></p>
-                : <p className="subtle" style={{ textAlign: "center" }}>{espace === "vendeur" ? "Vous vendez pour votre propre compte ? " : "Pas encore d'espace ? "}<button type="button" className="link" onClick={() => changer("inscription")}>Créer mon espace administrateur</button></p>)}
+                : <>
+                  {espace !== "vendeur" && <Btn type="button" size="lg" full icon={UserPlus} onClick={() => changer("demande")}>Demande d'accès administrateur</Btn>}
+                  <p className="subtle" style={{ textAlign: "center" }}>{espace === "vendeur" ? "Vous vendez pour votre propre compte ? " : "Vous avez déjà un code d'invitation ? "}<button type="button" className="link" onClick={() => changer("inscription")}>Créer mon espace administrateur</button></p>
+                </>)}
               {enLigne && !inscription && comptesTest.length > 0 && (
                 <div className="comptes-test">
                   <div className="label">Comptes de test — entrer en un clic</div>
@@ -6485,6 +6544,7 @@ function AuthScreen({ onSuccess, mode }) {
               {enLigne && <p className="subtle" style={{ textAlign: "center" }}><a className="link" href="/">← Retour à la page d'accueil</a></p>}
               {!enLigne && <div className="banner banner-warning"><AlertTriangle size={16} /><div>Mode démo hors ligne : les données restent dans ce navigateur.</div></div>}
             </form>
+            )}
           </div>
         </div>
       </div>

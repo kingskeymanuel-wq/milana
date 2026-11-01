@@ -1696,3 +1696,6 @@ body { background: transparent; }
 .envoi-ticket .btn { justify-content: flex-start; }
 .apercu-message summary { cursor: pointer; color: var(--link); font-size: 13px; }
 .apercu-message pre { white-space: pre-wrap; font: 12.5px/1.5 'IBM Plex Mono', ui-monospace, monospace; background: var(--surface-2); border-radius: 10px; padding: 10px 12px; margin: 8px 0 0; max-height: 220px; overflow: auto; }
+
+/* Demande d'accès : code personnel bien lisible */
+.code-acces-input .input { font: 700 22px/1 'IBM Plex Mono', ui-monospace, monospace; letter-spacing: .35em; }
