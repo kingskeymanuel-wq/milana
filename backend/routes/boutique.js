@@ -31,6 +31,7 @@ const { ticketEmail } = require("../lib/ticketEmail");
 const { mouvementLots, lotsDisponibles } = require("../lib/stock");
 const { genererTicket, journaliser } = require("../lib/tickets");
 const { prixEffectif, promoActive, remisePourcent } = require("../lib/prix");
+const agents = require("../lib/agents");
 const diagnostic = require("../lib/diagnostic");
 const router = express.Router();
 
@@ -69,6 +70,7 @@ function configPublique() {
     id: espace.id, slug: espace.slug,
     boutique: { nom: b.nom, slogan: b.slogan, adresse: b.adresse, telephone: b.telephone, whatsapp: b.whatsapp, message: b.message },
     ouverte: b.boutique_ouverte !== "0",
+    contact: agents.lireReglages().messages_actif === "1", // formulaire « Écrire à la boutique » (agent Messages)
     livraison: { frais, gratuite_des: gratuite, zone: b.zone_livraison },
     paiements: {
       livraison: true,
@@ -118,6 +120,19 @@ const lireParJeton = (jeton) => (/^[A-Za-z0-9_-]{16,64}$/.test(String(jeton)) ? 
 router.get("/boutiques", (req, res) => res.json(db.pourChaqueEspace(() => configPublique())));
 
 router.get("/config", espacePublic, (req, res) => res.json(configPublique()));
+
+// Message d'un client à la boutique : l'agent Messages prépare ou envoie la réponse
+const limiteContact = rateLimit({ windowMs: 15 * 60 * 1000, max: 8, standardHeaders: true, legacyHeaders: false, message: { erreur: "Trop de messages envoyés, réessayez plus tard." } });
+router.post("/contact", limiteContact, espacePublic, (req, res) => {
+  if (agents.lireReglages().messages_actif !== "1") return res.status(403).json({ erreur: "Cette boutique ne reçoit pas de messages ici." });
+  const nom = String(req.body.nom || "").trim(), email = String(req.body.email || "").trim(), telephone = String(req.body.telephone || "").trim(), texte = String(req.body.message || "").trim();
+  if (nom.length < 2) return res.status(400).json({ erreur: "Indiquez votre nom." });
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ erreur: "Adresse e-mail invalide." });
+  if (!email && telephone.replace(/\D/g, "").length < 8) return res.status(400).json({ erreur: "Indiquez un e-mail ou un téléphone pour la réponse." });
+  if (texte.length < 5) return res.status(400).json({ erreur: "Votre message est trop court." });
+  agents.recevoirMessage({ nom, email, telephone, sujet: req.body.sujet, texte });
+  res.status(201).json({ message: "Message envoyé" });
+});
 
 // Catalogue de la plateforme : les produits de toutes les boutiques ouvertes, les plus récents d'abord
 router.get("/produits", (req, res) => {
@@ -386,6 +401,7 @@ router.post("/commandes", limiteCommandes, espacePublic, async (req, res) => {
     envoyerEmail({ a: client.email, sujet, html, texte }).then(() => journaliser(commandeId, "email", null)).catch((e) => console.error("E-mail de commande :", e.message));
   }
 
+  agents.alerter("commande_en_ligne", commandeId); // SMS à l'administrateur et au vendeur
   res.status(201).json(reponse);
 });
 
@@ -407,6 +423,7 @@ async function verifierPaiementEnLigne(cmd) {
       enregistrerPaiement(actuel, { mode: "Paiement en ligne", statut: "payee", reference: r.transactionId || p.transaction_id || p.merchant_transaction_id, payeLe: maintenant });
       ajouterEvenement(actuel.id, { type: "paiement", texte: `Paiement en ligne confirmé par CinetPay (${totalCommande(actuel)} FCFA)`, date: maintenant });
     })();
+    agents.alerter("paiement", actuel.id);
   } else if (r.echoue && actuel.statut !== "annulee") {
     db.transaction(() => {
       enregistrerPaiement(actuel, { mode: "Paiement en ligne", statut: "echoue", reference: p.transaction_id });

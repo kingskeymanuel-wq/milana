@@ -278,3 +278,9 @@ body.vitrine { background: var(--surface); scroll-behavior: smooth; }
 .g-pack-premium { animation: gHalo 4s ease-in-out infinite; }
 @keyframes gHalo { 0%, 100% { box-shadow: 0 30px 80px rgba(242, 165, 22, .22); } 50% { box-shadow: 0 30px 100px rgba(242, 165, 22, .48); } }
 @media (prefers-reduced-motion: reduce) { .g-mot, .g-btn-or::after, .g-pack-premium, .v-main { animation: none; } }
+
+/* « Écrire à la boutique » */
+.g-contact-carte { max-width: 720px; margin: 0 auto; padding: 26px; border-radius: 20px; border: 1px solid var(--border); background: var(--surface); display: grid; gap: 18px; }
+.g-contact-carte h2 { display: flex; align-items: center; gap: 8px; font-size: 20px; margin: 0 0 4px; }
+.g-contact-champs { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 720px) { .g-contact-champs { grid-template-columns: 1fr; } }

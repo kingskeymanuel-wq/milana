@@ -116,6 +116,7 @@ app.use("/api/commandes", commandesRoutes);
 app.use("/api/investissements", adminOnly, investissementsRoutes);
 app.use("/api/stocks", adminOnly, stocksRoutes);
 app.use("/api/campagnes", adminOnly, campagnesRoutes);
+app.use("/api/agents", adminOnly, require("./routes/agents"));
 app.use("/api/dashboard", adminOnly, dashboardRoutes);
 app.use("/api/donnees", donneesRoutes);
 app.use("/api/parametres", parametresRoutes);

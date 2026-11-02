@@ -1707,3 +1707,15 @@ body { background: transparent; }
 .journal-admin summary { cursor: pointer; color: var(--link); font-size: 13px; }
 .journal-admin ul { margin: 8px 0 0; padding-left: 18px; font-size: 13px; display: flex; flex-direction: column; gap: 6px; }
 .journal-admin small { display: block; color: var(--text-3); }
+
+/* Agents IA */
+.agent-carte { text-align: left; cursor: pointer; font: inherit; color: inherit; transition: border-color .15s, box-shadow .15s; }
+.agent-carte.on { box-shadow: 0 0 0 1.5px var(--primary); }
+.apercu-agent { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; padding: 12px; border-radius: 10px; background: var(--surface-2); font-size: 13.5px; }
+.apercu-agent p { margin: 0; white-space: pre-wrap; }
+.reglage-ligne { display: flex; align-items: center; gap: 16px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; flex-wrap: wrap; }
+.message-client { border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
+.message-texte { margin: 8px 0 10px; white-space: pre-wrap; font-size: 13.5px; }
+.message-reponse { background: var(--success-bg); border-radius: 10px; padding: 10px 12px; font-size: 13px; white-space: pre-wrap; }
+.message-reponse small { display: block; font-weight: 650; margin-bottom: 4px; color: var(--success); }
+.journal-detail { white-space: pre-wrap; overflow-wrap: anywhere; }

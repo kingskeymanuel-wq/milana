@@ -11,7 +11,7 @@ import {
   Printer, Copy, RotateCcw, ShoppingBag, LayoutGrid, List, AlertCircle, AlertTriangle, Info, Sparkles,
   CreditCard, Smartphone, Banknote, TrendingUp, Inbox, UserPlus, User, MessageSquare, Store, Wallet,
   Boxes, Megaphone, Percent, Send, History, ClipboardList, PackagePlus, PackageMinus, CalendarClock, FileText, Gift,
-  UserCheck, Link2, KeyRound, ExternalLink,
+  UserCheck, Link2, KeyRound, ExternalLink, Bot,
 } from "lucide-react";
 import { lignesTicket, telechargerTicketPdf, urlTicketPdf, pdfIntegrable, telInternational, genererQr, cheminQr, lienTicket, fichierTicketPdf, partagePdfPossible, base64TicketPdf } from "../partage/ticket.js";
 
@@ -1206,6 +1206,7 @@ const NAV = [
   { key: "tickets", label: "Tickets de caisse", icon: FileText, badge: (d) => d.commandes.filter((c) => c.statut !== "annulee" && !c.ticketRemisLe).length },
   { key: "vendeurs", label: "Vendeurs", icon: UserCheck, admin: true },
   { key: "marketing", label: "Marketing", icon: Megaphone, admin: true },
+  { key: "agents", label: "Agents IA", icon: Bot, admin: true, serveur: true },
   { key: "finances", label: "Finances", icon: Landmark, admin: true },
   { key: "caisse", label: "Caisse", icon: Banknote, admin: true, serveur: true },
   { key: "mobile-money", label: "Mobile Money", icon: Smartphone, admin: true, serveur: true },
@@ -6616,6 +6617,290 @@ function AuthScreen({ onSuccess, mode }) {
 }
 
 /* =====================================================================
+   PAGE : Agents IA — campagnes programmées, messages des clients, alertes SMS, tâches automatiques
+   ===================================================================== */
+const FREQUENCES = [{ value: "quotidien", label: "Chaque jour" }, { value: "hebdomadaire", label: "Chaque semaine" }, { value: "mensuel", label: "Chaque mois" }];
+const AGENTS = {
+  campagnes: { nom: "Agent Campagnes", icon: Megaphone, tint: 0 },
+  messages: { nom: "Agent Messages", icon: MessageSquare, tint: 4 },
+  alertes: { nom: "Agent Alertes", icon: Bell, tint: 1 },
+  taches: { nom: "Tâches automatiques", icon: ClipboardList, tint: 2 },
+};
+const quand = (p) => `${p.frequence === "quotidien" ? "Chaque jour" : p.frequence === "mensuel" ? `Le ${p.jour} du mois` : `Chaque ${JOURS[p.jour]?.toLowerCase()}`} à ${pad(p.heure)} h`;
+
+function ProgrammeModal({ open, programme, info, onClose, onMaj }) {
+  const { toast } = useApp();
+  const vide = { nom: "", type: "newsletter", consigne: "", audience: "tous", canaux: ["sms", "email"], frequence: "hebdomadaire", jour: 1, heure: 9 };
+  const [f, setF] = useState(vide);
+  const [apercu, setApercu] = useState(null);
+  const [busy, setBusy] = useState("");
+  useEffect(() => {
+    if (!open) return;
+    setF(programme ? { ...programme, canaux: String(programme.canaux).split(",").filter(Boolean) } : vide);
+    setApercu(null); setBusy("");
+  }, [open]);
+  const rediger = async () => {
+    setBusy("apercu");
+    try { setApercu(await apiFetch("POST", "/api/agents/rediger", { type: f.type, consigne: f.consigne, canaux: f.canaux })); }
+    catch (e) { toast({ title: "Aperçu impossible", desc: e.message, tone: "critical" }); }
+    finally { setBusy(""); }
+  };
+  const enregistrer = async () => {
+    setBusy("save");
+    try {
+      await apiFetch(programme ? "PUT" : "POST", "/api/agents/programmes" + (programme ? "/" + programme.id : ""), { ...f, nom: f.nom.trim() || info.types[f.type].nom });
+      toast({ title: programme ? "Programme modifié" : "Programme créé", desc: quand(f) });
+      onMaj(); onClose();
+    } catch (e) { toast({ title: "Enregistrement impossible", desc: e.message, tone: "critical" }); }
+    finally { setBusy(""); }
+  };
+  return (
+    <Modal open={open} onClose={onClose} title={programme ? "Modifier le programme" : "Programmer une campagne"} size="lg"
+      footer={<><Btn onClick={onClose}>Annuler</Btn><Btn variant="primary" icon={CalendarClock} loading={busy === "save"} onClick={enregistrer}>Enregistrer le programme</Btn></>}>
+      <div className="stack">
+        <div className="form-grid">
+          <Field label="Type de message"><Select value={f.type} onChange={(e) => { setF({ ...f, type: e.target.value, audience: e.target.value === "relance" ? "inactifs" : f.audience }); setApercu(null); }}>{Object.entries(info?.types || {}).map(([k, t]) => <option key={k} value={k}>{t.nom}</option>)}</Select></Field>
+          <Field label="Nom du programme" optional><Input value={f.nom} onChange={(e) => setF({ ...f, nom: e.target.value })} placeholder={info?.types?.[f.type]?.nom} /></Field>
+        </div>
+        <Field label="Votre consigne à l'agent" help="L'agent prépare le message à chaque envoi, d'après votre consigne et vos produits du moment.">
+          <textarea className="textarea" rows={3} value={f.consigne} onChange={(e) => { setF({ ...f, consigne: e.target.value }); setApercu(null); }} placeholder={info?.types?.[f.type]?.consigne} />
+        </Field>
+        <div className="form-grid">
+          <Field label="Fréquence"><Select value={f.frequence} onChange={(e) => setF({ ...f, frequence: e.target.value, jour: e.target.value === "mensuel" || e.target.value === "hebdomadaire" ? 1 : f.jour })}>{FREQUENCES.map((x) => <option key={x.value} value={x.value}>{x.label}</option>)}</Select></Field>
+          {f.frequence === "hebdomadaire" && <Field label="Jour"><Select value={f.jour} onChange={(e) => setF({ ...f, jour: Number(e.target.value) })}>{[1, 2, 3, 4, 5, 6, 0].map((j) => <option key={j} value={j}>{JOURS[j]}</option>)}</Select></Field>}
+          {f.frequence === "mensuel" && <Field label="Jour du mois"><Select value={f.jour} onChange={(e) => setF({ ...f, jour: Number(e.target.value) })}>{[...Array(28)].map((_, k) => <option key={k + 1} value={k + 1}>{k + 1}</option>)}</Select></Field>}
+          <Field label="Heure (Abidjan)"><Select value={f.heure} onChange={(e) => setF({ ...f, heure: Number(e.target.value) })}>{[...Array(24)].map((_, k) => <option key={k} value={k}>{pad(k)} h 00</option>)}</Select></Field>
+        </div>
+        <div className="form-grid">
+          <Field label="Audience"><Select value={f.audience} onChange={(e) => setF({ ...f, audience: e.target.value })}>{Object.entries(info?.audiences || {}).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select></Field>
+          <Field label="Canaux"><CanauxChoix value={f.canaux} onChange={(canaux) => setF({ ...f, canaux })} /></Field>
+        </div>
+        <Field label="Exemple de message">
+          {apercu ? <div className="apercu-agent"><Badge tone={apercu.ia ? "magic" : "neutral"} icon={apercu.ia ? Sparkles : FileText}>{apercu.ia ? "Rédigé par l'IA" : "Message type"}</Badge><p>{apercu.message}</p>{/\{\w+\}/.test(apercu.message) && <small className="subtle">Les mots entre accolades sont remplacés à l'envoi : prénom du client, nom de la boutique, nouveautés, lien.</small>}</div>
+            : <Btn icon={Sparkles} loading={busy === "apercu"} onClick={rediger}>Voir un exemple</Btn>}
+        </Field>
+      </div>
+    </Modal>
+  );
+}
+
+function CarteMessage({ m, onMaj }) {
+  const { toast } = useApp();
+  const [texte, setTexte] = useState(m.reponse || "");
+  const [busy, setBusy] = useState("");
+  useEffect(() => { setTexte(m.reponse || ""); }, [m.reponse]);
+  const agir = async (action, corps) => {
+    setBusy(action);
+    try {
+      await apiFetch("POST", `/api/agents/messages/${m.id}/${action}`, corps);
+      if (action === "repondre") toast({ title: "Réponse envoyée", desc: m.de_email || m.de_telephone });
+      onMaj();
+    } catch (e) { toast({ title: "Action impossible", desc: e.message, tone: "critical" }); }
+    finally { setBusy(""); }
+  };
+  const traite = m.statut === "repondu" || m.statut === "ignore";
+  return (
+    <div className="message-client">
+      <div className="row-between" style={{ flexWrap: "wrap" }}>
+        <div className="row" style={{ gap: 10 }}><Avatar name={m.de_nom || "Client"} size="sm" /><div><div className="strong">{m.de_nom || "Client"}</div><div className="subtle">{[m.de_email, m.de_telephone].filter(Boolean).join(" · ")} · {fmtDateTime(m.cree_le)}</div></div></div>
+        <Badge tone={m.statut === "repondu" ? "success" : m.statut === "ignore" ? "neutral" : m.statut === "brouillon" ? "warning" : "info"} dot>{m.statut === "repondu" ? "Répondu" : m.statut === "ignore" ? "Classé" : m.statut === "brouillon" ? "Réponse à valider" : "Nouveau"}</Badge>
+      </div>
+      {m.sujet && <div className="strong" style={{ marginTop: 8 }}>{m.sujet}</div>}
+      <p className="message-texte">{m.texte}</p>
+      {traite ? (m.reponse && m.statut === "repondu" ? <div className="message-reponse"><small>Votre réponse{m.repondu_le ? ` · ${fmtDateTime(m.repondu_le)}` : ""}</small>{m.reponse}</div> : null) : (
+        <>
+          <textarea className="textarea" rows={4} value={texte} onChange={(e) => setTexte(e.target.value)} placeholder={m.statut === "nouveau" ? "L'agent prépare une réponse…" : "Votre réponse…"} />
+          <div className="row" style={{ justifyContent: "flex-end", flexWrap: "wrap", marginTop: 8 }}>
+            <Btn size="sm" onClick={() => agir("ignorer")} loading={busy === "ignorer"}>Classer sans répondre</Btn>
+            <Btn size="sm" icon={Sparkles} onClick={() => agir("rediger")} loading={busy === "rediger"}>Proposer une autre réponse</Btn>
+            <Btn size="sm" variant="primary" icon={Send} disabled={texte.trim().length < 2} onClick={() => agir("repondre", { reponse: texte })} loading={busy === "repondre"}>Envoyer la réponse</Btn>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function NumerosAlertes({ valeur, onEnregistrer }) {
+  const [v, setV] = useState(valeur || "");
+  useEffect(() => { setV(valeur || ""); }, [valeur]);
+  return (
+    <Field label="Autres numéros à prévenir" optional help="Séparés par une virgule (associé, gérant…). Ils reçoivent aussi le bilan du soir et les alertes de stock.">
+      <div className="row"><Input icon={Phone} value={v} onChange={(e) => setV(e.target.value)} placeholder="0700000000, 0500000000" className="grow" />{v !== (valeur || "") && <Btn variant="primary" onClick={() => onEnregistrer(v)}>Enregistrer</Btn>}</div>
+    </Field>
+  );
+}
+
+function OngletTaches({ info, r, regler, onMaj }) {
+  const { toast, confirm } = useApp();
+  const [bilan, setBilan] = useState(null);
+  const [busy, setBusy] = useState("");
+  const voir = async () => {
+    setBusy("voir");
+    try { setBilan(await apiFetch("GET", "/api/agents/bilan")); }
+    catch (e) { toast({ title: "Bilan indisponible", desc: e.message, tone: "critical" }); }
+    finally { setBusy(""); }
+  };
+  const envoyer = async () => {
+    if (!(await confirm({ title: "Envoyer le bilan du jour maintenant ?", message: "Il part par SMS aux administrateurs et aux numéros ajoutés, et par e-mail aux administrateurs qui ont une adresse.", confirmLabel: "Envoyer" }))) return;
+    setBusy("envoyer");
+    try { const x = await apiFetch("POST", "/api/agents/bilan", {}); setBilan({ ...x.bilan, texte: x.texte }); toast({ title: "Bilan envoyé" }); onMaj(); }
+    catch (e) { toast({ title: "Envoi impossible", desc: e.message, tone: "critical" }); }
+    finally { setBusy(""); }
+  };
+  return (
+    <div className="stack" style={{ padding: 16 }}>
+      <div className="reglage-ligne">
+        <div className="grow"><b>Bilan du soir</b><div className="subtle">Chaque soir, un SMS avec les ventes du jour, la marge, l'argent encore à encaisser (paiements à la livraison) et les produits à réapprovisionner.</div></div>
+        <Select value={r.taches_rapport_heure} onChange={(e) => regler({ taches_rapport_heure: Number(e.target.value) })} aria-label="Heure du bilan" style={{ width: 120 }} disabled={r.taches_rapport !== "1"}>{[...Array(24)].map((_, k) => <option key={k} value={String(k)}>{pad(k)} h 00</option>)}</Select>
+        <Switch on={r.taches_rapport === "1"} onChange={(v) => regler({ taches_rapport: v })} label="Activer le bilan du soir" />
+      </div>
+      <div className="reglage-ligne">
+        <div className="grow"><b>Alerte de stock bas</b><div className="subtle">Un SMS dès qu'un produit passe sous son seuil d'alerte (réglable sur la fiche du produit).{info.stocks_bas ? ` ${info.stocks_bas} produit${info.stocks_bas > 1 ? "s sont" : " est"} sous le seuil en ce moment.` : ""}</div></div>
+        <Switch on={r.taches_stock === "1"} onChange={(v) => regler({ taches_stock: v })} label="Activer l'alerte de stock bas" />
+      </div>
+      <div className="reglage-ligne">
+        <div className="grow"><b>Relance des clients absents</b><div className="subtle">Programmez une campagne « Relance des clients » pour les clients sans achat depuis 30 jours : l'agent Campagnes la rédige et l'envoie.</div></div>
+      </div>
+      {bilan && <div className="apercu-agent"><Badge tone="info" icon={ClipboardList}>Bilan du jour</Badge><p>{bilan.texte}</p></div>}
+      <div className="row" style={{ justifyContent: "flex-end", flexWrap: "wrap" }}>
+        <Btn icon={Eye} loading={busy === "voir"} onClick={voir}>Voir le bilan du jour</Btn>
+        <Btn icon={Send} loading={busy === "envoyer"} onClick={envoyer}>M'envoyer le bilan maintenant</Btn>
+      </div>
+    </div>
+  );
+}
+
+function PageAgents() {
+  const { toast, confirm } = useApp();
+  const [info, setInfo] = useState(null);
+  const [onglet, setOnglet] = useState("campagnes");
+  const [prog, setProg] = useState(null); // null | {} (nouveau) | programme
+  const [busy, setBusy] = useState("");
+  const charger = useCallback(() => apiFetch("GET", "/api/agents").then(setInfo).catch((e) => toast({ title: "Agents indisponibles", desc: e.message, tone: "critical" })), []);
+  useEffect(() => { charger(); }, []);
+  // Les agents travaillent en arrière-plan : on rafraîchit régulièrement
+  useEffect(() => { const t = setInterval(charger, 15000); return () => clearInterval(t); }, []);
+  if (!info) return <><PageHeader title="Agents IA" /><Card><div className="pdf-attente"><span className="spinner" />Chargement…</div></Card></>;
+
+  const r = info.reglages;
+  const regler = async (patch) => {
+    setInfo((s) => ({ ...s, reglages: { ...s.reglages, ...Object.fromEntries(Object.entries(patch).map(([k, v]) => [k, Array.isArray(v) ? v.join(",") : typeof v === "boolean" ? (v ? "1" : "0") : String(v)])) } }));
+    try { await apiFetch("PUT", "/api/agents/reglages", patch); } catch (e) { toast({ title: "Réglage non enregistré", desc: e.message, tone: "critical" }); charger(); }
+  };
+  const evts = r.alertes_evenements.split(",").filter(Boolean);
+  const executer = async (p) => {
+    if (!(await confirm({ title: `Lancer « ${p.nom} » maintenant ?`, message: "L'agent rédige le message et l'envoie tout de suite aux clients abonnés.", confirmLabel: "Lancer" }))) return;
+    setBusy(p.id);
+    try { const x = await apiFetch("POST", `/api/agents/programmes/${p.id}/executer`, {}); toast({ title: "Campagne lancée", desc: `${x.destinataires} client(s)` }); charger(); }
+    catch (e) { toast({ title: "Lancement impossible", desc: e.message, tone: "critical" }); }
+    finally { setBusy(""); }
+  };
+  const basculer = async (p) => { await apiFetch("PUT", `/api/agents/programmes/${p.id}`, { actif: !p.actif }).catch(() => {}); charger(); };
+  const supprimer = async (p) => {
+    if (!(await confirm({ title: `Supprimer « ${p.nom} » ?`, message: "Ce programme ne sera plus exécuté.", confirmLabel: "Supprimer", tone: "critical" }))) return;
+    await apiFetch("DELETE", `/api/agents/programmes/${p.id}`).catch(() => {}); charger();
+  };
+  const essaiSms = async () => {
+    setBusy("sms");
+    try { const x = await apiFetch("POST", "/api/agents/alertes/test", {}); toast({ title: "SMS d'essai envoyé", desc: x.telephone }); charger(); }
+    catch (e) { toast({ title: "Envoi impossible", desc: e.message, tone: "critical" }); }
+    finally { setBusy(""); }
+  };
+  const aTraiter = info.messages.filter((m) => m.statut === "nouveau" || m.statut === "brouillon").length;
+  const nbTaches = (r.taches_rapport === "1") + (r.taches_stock === "1");
+
+  return (
+    <>
+      <PageHeader title="Agents IA" meta="Vos agents travaillent selon votre programmation"
+        actions={<Btn variant="primary" icon={CalendarClock} onClick={() => setProg({})}>Programmer une campagne</Btn>} />
+
+      <div className="kpi-grid stagger">
+        {[["campagnes", `${info.programmes.filter((p) => p.actif).length} programme(s) actif(s)`, info.programmes.some((p) => p.actif)], ["messages", aTraiter ? `${aTraiter} message(s) à traiter` : "Aucun message en attente", r.messages_actif === "1"], ["alertes", `${evts.length} événement(s) surveillé(s)`, r.alertes_actif === "1"], ["taches", `${nbTaches} tâche(s) en service`, nbTaches > 0]].map(([k, sub, actif], i) => {
+          const A = AGENTS[k];
+          return (
+            <button key={k} className={cx("card kpi agent-carte", onglet === k && "on")} style={{ "--i": i }} onClick={() => setOnglet(k)}>
+              <div className="row-between"><span className={cx("todo-icon", `tint-${A.tint}`)}><A.icon size={16} /></span><Badge tone={actif ? "success" : "neutral"} dot>{actif ? "En service" : "En pause"}</Badge></div>
+              <div className="strong" style={{ marginTop: 8 }}>{A.nom}</div><div className="subtle">{sub}</div>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="card" style={{ marginBottom: 16 }}><div className="table-toolbar"><Tabs value={onglet} onChange={setOnglet} tabs={[{ key: "campagnes", label: "Campagnes programmées", count: info.programmes.length }, { key: "messages", label: "Messages des clients", count: aTraiter || null }, { key: "alertes", label: "Alertes SMS" }, { key: "taches", label: "Tâches automatiques" }, { key: "journal", label: "Journal" }]} /></div>
+
+        {onglet === "campagnes" && (info.programmes.length === 0 ? (
+          <EmptyState icon={CalendarClock} title="Aucune campagne programmée" action={<Btn variant="primary" icon={Plus} onClick={() => setProg({})}>Programmer une campagne</Btn>}>Choisissez un type de message, un jour et une heure : l'agent rédige et envoie à votre place.</EmptyState>
+        ) : (
+          <div className="list" style={{ padding: 8 }}>
+            {info.programmes.map((p) => (
+              <div key={p.id} className="list-item">
+                <span className={cx("todo-icon", p.actif ? "tint-0" : "tint-6")}><Megaphone size={15} /></span>
+                <div className="grow" style={{ minWidth: 0 }}>
+                  <div className="row" style={{ gap: 8, flexWrap: "wrap" }}><span className="strong">{p.nom}</span><Badge>{info.types[p.type]?.nom || p.type}</Badge></div>
+                  <div className="subtle">{quand(p)} · {String(p.canaux).split(",").map((x) => (x === "sms" ? "SMS" : "E-mail")).join(" + ")} · {info.audiences[p.audience] || p.audience}</div>
+                  {p.consigne && <div className="subtle truncate">Consigne : {p.consigne}</div>}
+                  {p.derniere_execution && <div className="subtle">Dernier envoi : {fmtDateTime(p.derniere_execution)}</div>}
+                </div>
+                <Switch on={!!p.actif} onChange={() => basculer(p)} label={`Activer ${p.nom}`} />
+                <Btn size="sm" icon={Send} loading={busy === p.id} onClick={() => executer(p)}>Lancer</Btn>
+                <button className="icon-btn" onClick={() => setProg(p)} aria-label={`Modifier ${p.nom}`}><Pencil size={15} /></button>
+                <button className="icon-btn danger" onClick={() => supprimer(p)} aria-label={`Supprimer ${p.nom}`}><Trash2 size={15} /></button>
+              </div>
+            ))}
+          </div>
+        ))}
+
+        {onglet === "messages" && (
+          <div className="stack" style={{ padding: 16 }}>
+            <div className="reglage-ligne"><div className="grow"><b>Agent Messages</b><div className="subtle">Vos clients vous écrivent depuis la page de votre boutique ; l'agent prépare une réponse à chaque message.</div></div><Switch on={r.messages_actif === "1"} onChange={(v) => regler({ messages_actif: v })} label="Activer l'agent Messages" /></div>
+            <div className="reglage-ligne"><div className="grow"><b>Mode de réponse</b><div className="subtle">{r.messages_mode === "auto" ? "L'agent envoie lui-même ses réponses rédigées par l'IA." : "Vous relisez chaque réponse avant l'envoi."}</div></div>
+              <Segmented value={r.messages_mode} onChange={(v) => regler({ messages_mode: v })} options={[{ value: "validation", label: "Je valide" }, { value: "auto", label: "Automatique" }]} /></div>
+            {info.messages.length === 0 ? <EmptyState icon={Inbox} title="Aucun message reçu">Vos clients peuvent vous écrire depuis la page de votre boutique (« Écrire à la boutique »).</EmptyState>
+              : info.messages.map((m) => <CarteMessage key={m.id} m={m} onMaj={charger} />)}
+          </div>
+        )}
+
+        {onglet === "alertes" && (
+          <div className="stack" style={{ padding: 16 }}>
+            <div className="reglage-ligne"><div className="grow"><b>Agent Alertes</b><div className="subtle">Un SMS dès qu'une vente est faite, qu'une commande arrive, est payée ou livrée.</div></div><Switch on={r.alertes_actif === "1"} onChange={(v) => regler({ alertes_actif: v })} label="Activer les alertes SMS" /></div>
+            <Field label="Événements signalés">
+              <div className="stack-sm">{Object.entries(info.evenements).map(([k, l]) => <Checkbox key={k} checked={evts.includes(k)} label={l} onChange={() => regler({ alertes_evenements: evts.includes(k) ? evts.filter((x) => x !== k) : [...evts, k] })} />)}</div>
+            </Field>
+            <Field label="Destinataires">
+              <div className="stack-sm">
+                <Checkbox checked={r.alertes_admin === "1"} label="L'administrateur (vous)" onChange={() => regler({ alertes_admin: r.alertes_admin !== "1" })} />
+                <Checkbox checked={r.alertes_vendeur === "1"} label="Le vendeur concerné par la vente" onChange={() => regler({ alertes_vendeur: r.alertes_vendeur !== "1" })} />
+              </div>
+            </Field>
+            <NumerosAlertes valeur={r.alertes_numeros} onEnregistrer={(v) => regler({ alertes_numeros: v })} />
+            <div className="row" style={{ justifyContent: "flex-end" }}><Btn icon={Smartphone} loading={busy === "sms"} onClick={essaiSms}>M'envoyer un SMS d'essai</Btn></div>
+          </div>
+        )}
+
+        {onglet === "taches" && <OngletTaches info={info} r={r} regler={regler} onMaj={charger} />}
+
+        {onglet === "journal" && (info.journal.length === 0 ? <EmptyState icon={History} title="Aucune activité">Le travail de vos agents s'affichera ici.</EmptyState> : (
+          <div className="list" style={{ padding: 8 }}>
+            {info.journal.map((j) => {
+              const A = AGENTS[j.agent] || AGENTS.campagnes;
+              return (
+                <div key={j.id} className="list-item" style={{ alignItems: "flex-start" }}>
+                  <span className={cx("todo-icon", j.statut === "erreur" ? "tint-3" : `tint-${A.tint}`)}><A.icon size={15} /></span>
+                  <div className="grow" style={{ minWidth: 0 }}><div className="row-between"><span className="strong">{j.titre}</span><span className="subtle" style={{ whiteSpace: "nowrap" }}>{fmtDateTime(j.cree_le)}</span></div>{j.detail && <div className="subtle journal-detail">{j.detail}</div>}</div>
+                </div>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+
+      <ProgrammeModal open={!!prog} programme={prog?.id ? prog : null} info={info} onClose={() => setProg(null)} onMaj={charger} />
+    </>
+  );
+}
+
+/* =====================================================================
    Ticket de caisse public (lien / QR code remis au client, sans connexion)
    ===================================================================== */
 function PageRecuPublic({ jeton }) {
@@ -6889,6 +7174,7 @@ function App() {
     case "finances": content = estAdmin ? <PageFinances route={route} /> : <AccesReserve />; break;
     case "caisse": content = estAdmin ? <PageCaisse /> : <AccesReserve />; break;
     case "mobile-money": content = estAdmin ? <PageRapprochement /> : <AccesReserve />; break;
+    case "agents": content = estAdmin && mode === "api" ? <PageAgents /> : <AccesReserve />; break;
     case "rapport": content = estAdmin ? <PageRapport mois={route.id} /> : <AccesReserve />; break;
     case "vendeurs": content = estAdmin ? <PageVendeurs /> : <AccesReserve />; break;
     case "tickets": content = <PageTickets route={route} />; break;

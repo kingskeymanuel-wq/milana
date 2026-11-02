@@ -189,6 +189,20 @@ function ouvrirEspace(fichier) {
   // Commandes antérieures : en ligne ou avec frais de livraison = colis à livrer
   if (nouvelleColonneLivraison) db.exec("UPDATE commandes SET livraison = 1 WHERE canal = 'en_ligne' OR frais_livraison > 0");
 
+  // v9 : agents IA — programmes de campagnes, messages des clients, journal d'activité
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS agents_programmes (
+      id TEXT PRIMARY KEY, nom TEXT NOT NULL, type TEXT NOT NULL DEFAULT 'newsletter', consigne TEXT,
+      audience TEXT NOT NULL DEFAULT 'tous', canaux TEXT NOT NULL DEFAULT 'sms',
+      frequence TEXT NOT NULL DEFAULT 'hebdomadaire', jour INTEGER NOT NULL DEFAULT 1, heure INTEGER NOT NULL DEFAULT 9,
+      actif INTEGER NOT NULL DEFAULT 1, dernier TEXT, derniere_execution TEXT, cree_le TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS agents_journal (
+      id TEXT PRIMARY KEY, agent TEXT NOT NULL, titre TEXT NOT NULL, detail TEXT, statut TEXT NOT NULL DEFAULT 'ok', cree_le TEXT NOT NULL);
+    CREATE INDEX IF NOT EXISTS idx_agents_journal_date ON agents_journal(cree_le);
+    CREATE TABLE IF NOT EXISTS messages_entrants (
+      id TEXT PRIMARY KEY, de_nom TEXT, de_email TEXT, de_telephone TEXT, sujet TEXT, texte TEXT NOT NULL, source TEXT,
+      reponse TEXT, statut TEXT NOT NULL DEFAULT 'nouveau', cree_le TEXT NOT NULL, repondu_le TEXT);`);
+
   // Anciens libellés de paiement → libellés actuels
   db.prepare("UPDATE ventes SET mode_paiement = 'Carte bancaire' WHERE mode_paiement = 'Carte'").run();
 

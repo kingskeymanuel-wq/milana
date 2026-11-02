@@ -108,6 +108,7 @@ function action(c, quoi, p) {
   }
   if (quoi === "remis") {
     changerStatut(c.id, "livree", null, `Remis au client${nomLivreur(c) ? " par " + nomLivreur(c) : ""}`);
+    require("./agents").alerter("livraison", c.id);
     return { ok: true };
   }
   return { erreur: "Action inconnue" };

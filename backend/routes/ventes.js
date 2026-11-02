@@ -9,6 +9,7 @@ const { idOuNouveau, versIso, prochainNumero, ajouterEvenement } = require("../l
 const { lireBoutique } = require("./parametres");
 const { adminOnly } = require("../middleware/auth");
 const { clientVisible } = require("../lib/clients");
+const agents = require("../lib/agents");
 const router = express.Router();
 
 function enrichir(vente) {
@@ -115,6 +116,7 @@ router.post("/", (req, res) => {
   if (paiement.statut === "payee") require("../lib/caisse").marquerCompteVendeur(commandeId, req.user?.id, paiement.mode);
   require("../lib/zones").attribuer(commandeId); // colis à livrer : livreur de la zone
 
+  agents.alerter("vente", commandeId); // SMS à l'administrateur et au vendeur
   res.status(201).json(enrichir(db.prepare("SELECT * FROM ventes WHERE id = ?").get(venteId)));
 });
 

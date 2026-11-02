@@ -11,6 +11,7 @@ const { journaliser, ACTIONS_VENDEUR } = require("../lib/tickets");
 const { nanoid } = require("nanoid");
 const { mouvementLots, lotsDisponibles } = require("../lib/stock");
 const { prixEffectif } = require("../lib/prix");
+const agents = require("../lib/agents");
 const router = express.Router();
 
 const STATUTS_VALIDES = ["en_attente", "confirmee", "expediee", "livree", "annulee"];
@@ -90,6 +91,7 @@ router.patch("/:id/statut", (req, res) => {
   const cmd = db.transaction(() => changerStatut(req.params.id, statut, req.user?.id))();
   if (!cmd) return res.status(404).json({ erreur: "Commande introuvable" });
   suiviAnnulation(avant, cmd, req.user?.id);
+  if (statut === "livree" && avant?.statut !== "livree") agents.alerter("livraison", cmd.id);
   res.json(enrichir(cmd));
 });
 
@@ -104,7 +106,10 @@ router.post("/statut", (req, res) => {
   const autorises = ids.map(String).filter((id) => { const c = lire(id); return c && aMoi(c, req) && !annulationInterdite(c, statut, req) && !dejaRembourse(c, statut); });
   const avants = new Map(autorises.map((id) => [id, lire(id)]));
   const modifiees = db.transaction(() => autorises.map((id) => changerStatut(id, statut, req.user?.id)).filter(Boolean))();
-  for (const c of modifiees) suiviAnnulation(avants.get(c.id), c, req.user?.id);
+  for (const c of modifiees) {
+    suiviAnnulation(avants.get(c.id), c, req.user?.id);
+    if (statut === "livree" && avants.get(c.id)?.statut !== "livree") agents.alerter("livraison", c.id);
+  }
   res.json({ modifiees: modifiees.length });
 });
 
@@ -148,6 +153,7 @@ router.patch("/:id/paiement", (req, res) => {
     require("../lib/caisse").marquerCompteVendeur(cmd.id, req.user?.id, p.mode);
     ajouterEvenement(cmd.id, { type: "paiement", texte: verification ? `Paiement vérifié et confirmé (${p.mode})` : `Paiement encaissé (${p.mode})`, auteurId: req.user?.id, date: maintenant });
   })();
+  agents.alerter("paiement", cmd.id);
   res.json(enrichir(lire(cmd.id)));
 });
 
