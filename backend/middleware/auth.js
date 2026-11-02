@@ -26,8 +26,11 @@ function authRequired(req, res, next) {
   if (!charge.b || !db.boutiqueParRef(charge.b)) return res.status(401).json({ erreur: "Session expirée, reconnectez-vous" });
   db.dansEspace(charge.b, () => {
     // Le compte doit toujours exister ; son rôle actuel prime sur celui du jeton
-    const user = db.prepare("SELECT id, nom, telephone, email, role FROM utilisateurs WHERE id = ? AND actif = 1").get(charge.id);
+    const user = db.prepare("SELECT id, nom, telephone, email, role, sessions_version FROM utilisateurs WHERE id = ? AND actif = 1").get(charge.id);
     if (!user) return res.status(401).json({ erreur: "Compte introuvable, reconnectez-vous" });
+    // Mot de passe changé (ou compte désactivé puis réactivé) depuis la connexion : session fermée
+    if ((charge.v || 0) !== (user.sessions_version || 0)) return res.status(401).json({ erreur: "Session expirée, reconnectez-vous" });
+    delete user.sessions_version;
     req.user = user;
     req.boutique = db.espaceCourant();
     next();
@@ -42,7 +45,7 @@ function adminOnly(req, res, next) {
 }
 
 function signToken(user, boutiqueId) {
-  return jwt.sign({ id: user.id, b: boutiqueId, nom: user.nom, telephone: user.telephone, email: user.email, role: user.role }, SECRET, {
+  return jwt.sign({ id: user.id, b: boutiqueId, v: user.sessions_version || 0, nom: user.nom, telephone: user.telephone, email: user.email, role: user.role }, SECRET, {
     expiresIn: "7d",
   });
 }

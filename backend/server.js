@@ -41,14 +41,18 @@ app.use(
         // L'interface compile son JSX dans le navigateur (Babel) et charge
         // React / les icônes depuis des CDN : d'où 'unsafe-eval' et ces origines.
         // cdnjs : génération du PDF (jsPDF) et du QR code des tickets de caisse
-        scriptSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com"],
+        scriptSrc: ["'self'", "https://cdnjs.cloudflare.com"],
+        scriptSrcAttr: ["'none'"],
         styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://cdnjs.cloudflare.com"],
         fontSrc: ["'self'", "https://fonts.gstatic.com"],
         // images.unsplash.com : photos d'illustration des produits de test
         imgSrc: ["'self'", "data:", "blob:", "https://images.unsplash.com", "https://tile.openstreetmap.org", "https://cdnjs.cloudflare.com"],
         // Aperçu du ticket PDF généré dans le navigateur (blob:)
         frameSrc: ["'self'", "blob:"],
-        connectSrc: ["'self'", "https://esm.sh", "https://unpkg.com", "https://cdnjs.cloudflare.com"],
+        connectSrc: ["'self'", "https://cdnjs.cloudflare.com"],
+        objectSrc: ["'none'"],
+        baseUri: ["'self'"],
+        frameAncestors: ["'self'"],
         // Désactivé : casserait l'accès en http depuis un téléphone du réseau local
         upgradeInsecureRequests: null,
       },
@@ -56,8 +60,13 @@ app.use(
   })
 );
 // CORS : utile si l'interface est servie depuis une autre adresse (ex. npx serve)
-app.use(cors({ origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(",") : true }));
-app.use(express.json({ limit: "15mb" })); // images produit (base64) et imports complets
+// En production sans CORS_ORIGIN : aucun autre site ne peut appeler l'API.
+const ORIGINES = process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(",").map((o) => o.trim()).filter(Boolean) : process.env.NODE_ENV === "production" ? false : true;
+app.use(cors({ origin: ORIGINES }));
+// Taille des envois : grande seulement là où il le faut (photos des produits, imports, relevés Mobile Money)
+app.use(["/api/packs", "/api/donnees"], express.json({ limit: "15mb" }));
+app.use("/api/rapprochement", express.json({ limit: "5mb" }));
+app.use(express.json({ limit: "200kb" }));
 
 // Limites anti-abus
 app.use("/api", rateLimit({ windowMs: 15 * 60 * 1000, max: 600, standardHeaders: true, legacyHeaders: false }));

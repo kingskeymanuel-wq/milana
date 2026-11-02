@@ -119,6 +119,8 @@ function ouvrirEspace(fichier) {
 
   // v6 : un vendeur peut être désactivé par son administrateur (son historique est conservé)
   ajouterColonne("utilisateurs", "actif", "INTEGER NOT NULL DEFAULT 1");
+  // Version des sessions : augmentée à chaque changement de mot de passe ou désactivation → anciennes connexions refusées
+  ajouterColonne("utilisateurs", "sessions_version", "INTEGER NOT NULL DEFAULT 0");
   // Vendeur supprimé qui avait vendu : compte fermé, numéro libéré, nom gardé pour l'historique des ventes
   ajouterColonne("utilisateurs", "supprime", "INTEGER NOT NULL DEFAULT 0");
   // Journal des actions sensibles de l'administrateur (remises à zéro, suppressions de vendeurs) : jamais effacé

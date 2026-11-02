@@ -25,7 +25,25 @@ const { lireBoutique, ecrireBoutique } = require("./parametres");
 
 const router = express.Router();
 
-const essais = new Map(); // téléphone → { n : essais ratés, jusqu : fin du verrouillage }
+/*
+ * Essais de mot de passe ratés. Le verrouillage vise la connexion qui se trompe (téléphone + adresse IP) :
+ * quelqu'un qui connaît votre numéro ne peut donc pas bloquer votre compte depuis chez lui.
+ * Au-delà de 30 échecs sur un même numéro (toutes adresses confondues), le numéro est verrouillé pour tous :
+ * c'est une attaque répartie sur plusieurs connexions.
+ */
+const VERROU_MS = 15 * 60 * 1000;
+const essais = new Map(); // clé → { n : essais ratés, debut : premier échec, jusqu : fin du verrouillage }
+function verrouille(cle) { const v = essais.get(cle); return Boolean(v && v.jusqu > Date.now()); }
+function noterEchec(cle, max) {
+  const maintenant = Date.now();
+  let v = essais.get(cle);
+  if (!v || maintenant - v.debut > VERROU_MS) v = { n: 0, debut: maintenant, jusqu: 0 };
+  v.n += 1;
+  if (v.n >= max) { v.jusqu = maintenant + VERROU_MS; v.n = 0; v.debut = maintenant; }
+  essais.set(cle, v);
+}
+// Ménage régulier : la table ne grossit pas sans fin
+setInterval(() => { const t = Date.now(); for (const [k, v] of essais) if (v.jusqu < t && t - v.debut > VERROU_MS) essais.delete(k); }, VERROU_MS).unref();
 const profil = (u) => ({ id: u.id, nom: u.nom, telephone: u.telephone, email: u.email, role: u.role, actif: u.actif !== 0 });
 const ficheBoutique = () => { const b = db.espaceCourant(); return { id: b.id, slug: b.slug, nom: lireBoutique().nom }; };
 
@@ -179,22 +197,16 @@ router.post("/connexion", (req, res) => {
   const telephone = normTel(req.body.telephone);
   if (!telephone || !mot_de_passe) return res.status(400).json({ erreur: "telephone et mot_de_passe sont requis" });
   const refus = () => res.status(401).json({ erreur: "Numéro ou mot de passe incorrect" });
-  // Cinq mots de passe faux de suite : le compte est verrouillé 15 minutes (protège contre les essais en série)
-  const verrou = essais.get(telephone);
-  if (verrou && verrou.jusqu > Date.now()) return res.status(429).json({ erreur: "Trop d'essais : ce compte est verrouillé pendant 15 minutes." });
-  const echec = () => {
-    const v = essais.get(telephone) || { n: 0, jusqu: 0 };
-    v.n += 1;
-    if (v.n >= 5) { v.jusqu = Date.now() + 15 * 60 * 1000; v.n = 0; }
-    essais.set(telephone, v);
-    return refus();
-  };
+  // Cinq mots de passe faux depuis la même connexion : verrouillée 15 minutes pour ce numéro
+  const cleIp = telephone + "|" + req.ip, cleTel = "tel|" + telephone;
+  if (verrouille(cleIp) || verrouille(cleTel)) return res.status(429).json({ erreur: "Trop d'essais : réessayez dans 15 minutes." });
+  const echec = () => { noterEchec(cleIp, 5); noterEchec(cleTel, 30); return refus(); };
   const boutiqueId = db.comptes.boutiqueDe(telephone);
   if (!boutiqueId) return echec();
   db.dansEspace(boutiqueId, () => {
     const user = db.prepare("SELECT * FROM utilisateurs WHERE telephone = ?").get(telephone);
     if (!user || !bcrypt.compareSync(String(mot_de_passe), user.mot_de_passe)) return echec();
-    essais.delete(telephone);
+    essais.delete(cleIp);
     if (user.actif === 0) return res.status(403).json({ erreur: "Ce compte a été désactivé par l'administrateur de la boutique." });
     res.json({ utilisateur: profil(user), boutique: ficheBoutique(), jeton: signToken(user, boutiqueId) });
   });
@@ -215,12 +227,13 @@ router.patch("/equipe/:id", authRequired, adminOnly, (req, res) => {
   if (!u) return res.status(404).json({ erreur: "Compte introuvable" });
   if (req.body.actif !== undefined) {
     if (u.id === req.user.id) return res.status(400).json({ erreur: "Vous ne pouvez pas désactiver votre propre compte" });
-    db.prepare("UPDATE utilisateurs SET actif = ? WHERE id = ?").run(req.body.actif ? 1 : 0, u.id);
+    db.prepare("UPDATE utilisateurs SET actif = ?, sessions_version = sessions_version + ? WHERE id = ?").run(req.body.actif ? 1 : 0, req.body.actif ? 0 : 1, u.id);
   }
   if (req.body.nom !== undefined && String(req.body.nom).trim()) db.prepare("UPDATE utilisateurs SET nom = ? WHERE id = ?").run(String(req.body.nom).trim().slice(0, 80), u.id);
   if (req.body.mot_de_passe !== undefined) {
     if (String(req.body.mot_de_passe).length < 8) return res.status(400).json({ erreur: "Le mot de passe doit contenir au moins 8 caractères" });
-    db.prepare("UPDATE utilisateurs SET mot_de_passe = ? WHERE id = ?").run(bcrypt.hashSync(String(req.body.mot_de_passe), 10), u.id);
+    // Nouveau mot de passe : toutes les sessions ouvertes de ce compte sont fermées
+    db.prepare("UPDATE utilisateurs SET mot_de_passe = ?, sessions_version = sessions_version + 1 WHERE id = ?").run(bcrypt.hashSync(String(req.body.mot_de_passe), 10), u.id);
   }
   res.json(profil(db.prepare("SELECT * FROM utilisateurs WHERE id = ?").get(u.id)));
 });
@@ -234,7 +247,7 @@ router.delete("/equipe/:id", authRequired, adminOnly, (req, res) => {
   if (u.role === "admin") return res.status(400).json({ erreur: "Un administrateur ne se supprime pas ici : désactivez-le" });
   const ventes = db.prepare("SELECT COUNT(*) AS n FROM ventes WHERE vendeur_id = ?").get(u.id).n;
   db.transaction(() => {
-    if (ventes) db.prepare("UPDATE utilisateurs SET actif = 0, supprime = 1, telephone = ? WHERE id = ?").run(`${u.telephone}#supprime-${u.id}`, u.id);
+    if (ventes) db.prepare("UPDATE utilisateurs SET actif = 0, supprime = 1, telephone = ?, sessions_version = sessions_version + 1 WHERE id = ?").run(`${u.telephone}#supprime-${u.id}`, u.id);
     else db.prepare("DELETE FROM utilisateurs WHERE id = ?").run(u.id);
     db.prepare("INSERT INTO journal_admin (id, action, detail, auteur_id, cree_le) VALUES (?, 'vendeur_supprime', ?, ?, ?)")
       .run(nanoid(), `${u.nom} (${u.telephone})${ventes ? ` — ${ventes} vente(s) gardée(s) à son nom` : ""}`, req.user.id, new Date().toISOString());
