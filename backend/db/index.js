@@ -116,6 +116,9 @@ function ouvrirEspace(fichier) {
   ajouterColonne("clients", "consentement_marketing", "INTEGER NOT NULL DEFAULT 0");
   ajouterColonne("clients", "jeton_desinscription", "TEXT");
   ajouterColonne("clients", "desinscrit_le", "TEXT");
+  // Répertoire : contacts importés du téléphone du propriétaire, invités un par un par l'agent Prospection
+  ajouterColonne("clients", "origine", "TEXT");
+  ajouterColonne("clients", "invite_le", "TEXT");
 
   // v6 : un vendeur peut être désactivé par son administrateur (son historique est conservé)
   ajouterColonne("utilisateurs", "actif", "INTEGER NOT NULL DEFAULT 1");

@@ -3486,8 +3486,96 @@ function PageProduits({ route }) {
 /* =====================================================================
    PAGE : Clients (liste)
    ===================================================================== */
+/* Répertoire du propriétaire et agent Prospection : les contacts du téléphone (ceux de WhatsApp) ou d'un fichier
+   rejoignent les clients ; chaque jour, l'agent prépare quelques invitations avec le lien de la boutique,
+   envoyées d'une touche sur WhatsApp. */
+function lireFichierContacts(texte) {
+  const contacts = [];
+  if (/BEGIN:VCARD/i.test(texte)) {
+    for (const bloc of texte.split(/END:VCARD/i)) {
+      const nom = (/^FN[^:]*:(.+)$/im.exec(bloc) || [])[1], tel = (/^TEL[^:]*:(.+)$/im.exec(bloc) || [])[1];
+      if (tel) contacts.push({ nom: (nom || "").trim(), telephone: tel.trim() });
+    }
+    return contacts;
+  }
+  const lignes = texte.split(/\r?\n/).filter((l) => l.trim());
+  if (!lignes.length) return contacts;
+  const sep = lignes[0].includes(";") ? ";" : ",";
+  const tete = lignes[0].toLowerCase().split(sep);
+  const iNom = tete.findIndex((h) => /name|nom/.test(h)), iTel = tete.findIndex((h) => /phone|tel|mobile|num/.test(h));
+  for (const l of lignes.slice(iTel >= 0 ? 1 : 0)) {
+    const c = l.split(sep).map((x) => x.replace(/^"|"$/g, "").trim());
+    const tel = iTel >= 0 ? c[iTel] : c.find((x) => x.replace(/\D/g, "").length >= 8);
+    if (tel) contacts.push({ nom: iNom >= 0 ? c[iNom] : c.find((x) => x && x !== tel) || "", telephone: tel });
+  }
+  return contacts;
+}
+const contactsDuTelephone = () => typeof navigator !== "undefined" && "contacts" in navigator && "select" in (navigator.contacts || {});
+const numeroWa = (t) => { const d = String(t || "").replace(/\D/g, ""); return d.length === 10 ? "225" + d : d.replace(/^00/, ""); };
+
+function RepertoireCarte() {
+  const { toast, rafraichir } = useApp();
+  const [p, setP] = useState(null);
+  const [ouvert, setOuvert] = useState(false);
+  const charger = useCallback(() => apiFetch("GET", "/api/clients/prospection").then(setP).catch(() => setP({ erreur: true })), []);
+  useEffect(() => { charger(); }, [charger]);
+
+  const importer = async (contacts) => {
+    if (!contacts.length) return toast({ title: "Aucun numéro trouvé", tone: "critical" });
+    try {
+      const r = await apiFetch("POST", "/api/clients/importer", { contacts });
+      toast({ title: `${r.ajoutes} contact(s) ajouté(s) au répertoire`, desc: [r.deja && `${r.deja} déjà connu(s)`, r.invalides && `${r.invalides} sans numéro valide`].filter(Boolean).join(" · ") || undefined });
+      await Promise.all([charger(), rafraichir?.()]);
+    } catch (e) { toast({ title: "Import impossible", desc: e.message, tone: "critical" }); }
+  };
+  const synchroniser = async () => {
+    try {
+      const choisis = await navigator.contacts.select(["name", "tel"], { multiple: true });
+      await importer(choisis.map((c) => ({ nom: c.name?.[0] || "", telephone: c.tel?.[0] || "" })));
+    } catch { /* fenêtre fermée */ }
+  };
+  const fichier = async (e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) await importer(lireFichierContacts(await f.text())); };
+  const marquer = async (id) => { await apiFetch("POST", `/api/clients/${id}/invite`); charger(); };
+
+  if (!p || p.erreur) return null;
+  return (
+    <div className="card repertoire-boutique">
+      <div className="repertoire-tete">
+        <div>
+          <div className="repertoire-titre">📇 Mon répertoire <span className="muted">· Agent Prospection</span></div>
+          <div className="muted">Vos contacts deviennent des clients potentiels : chaque jour, l'agent prépare {p.par_jour} invitations avec le lien de votre boutique. Vous les envoyez d'une touche sur WhatsApp.</div>
+        </div>
+        <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+          <Btn variant="primary" icon={Smartphone} onClick={synchroniser} disabled={!contactsDuTelephone()} title={contactsDuTelephone() ? "" : "Disponible sur Android avec Chrome"}>Synchroniser mes contacts</Btn>
+          <label className="btn btn-secondary"><Upload size={16} /> Importer un fichier<input type="file" accept=".vcf,.csv,text/vcard,text/csv" hidden onChange={fichier} /></label>
+        </div>
+      </div>
+      <div className="repertoire-chiffres">
+        <div><b>{p.repertoire}</b><span>contacts du répertoire</span></div>
+        <div><b>{p.invites}</b><span>déjà invités</span></div>
+        <div><b>{p.restants}</b><span>à inviter</span></div>
+        <div><b>{p.invites_aujourdhui}/{p.par_jour}</b><span>invitations aujourd'hui</span></div>
+      </div>
+      {!contactsDuTelephone() && <div className="muted repertoire-aide">Sur iPhone : app Contacts → sélectionner → Partager → fichier .vcf. Google Contacts : Exporter → vCard. Les contacts WhatsApp sont ceux de votre téléphone. Facebook ne partage pas les numéros : publiez plutôt le lien de votre boutique sur votre page.</div>}
+      {p.du_jour.length > 0 ? (
+        <>
+          <button className="repertoire-bascule" onClick={() => setOuvert(!ouvert)}>{ouvert ? "Masquer" : "Voir"} les {p.du_jour.length} invitation(s) du jour</button>
+          {ouvert && <div className="repertoire-liste">{p.du_jour.map((c) => (
+            <div key={c.id} className="repertoire-ligne">
+              <Avatar name={c.nom} />
+              <div className="grow"><div className="cell-main">{c.nom}</div><div className="cell-sub">{c.telephone}</div></div>
+              <a className="btn btn-primary btn-sm" href={`https://wa.me/${numeroWa(c.telephone)}?text=${encodeURIComponent(c.message)}`} target="_blank" rel="noopener noreferrer" onClick={() => setTimeout(() => marquer(c.id), 400)}>WhatsApp</a>
+              <Btn size="sm" onClick={() => marquer(c.id)}>Passer</Btn>
+            </div>
+          ))}</div>}
+        </>
+      ) : <div className="muted repertoire-aide">{p.repertoire ? (p.restants ? "Invitations du jour envoyées. Les suivantes arrivent demain." : "Tous vos contacts ont été invités. Ajoutez-en d'autres pour continuer.") : "Ajoutez vos contacts pour que l'agent commence."}</div>}
+    </div>
+  );
+}
+
 function PageClients({ route }) {
-  const { data, go, toast } = useApp();
+  const { data, go, toast, mode } = useApp();
   const [tab, setTab] = useState("tous");
   const [q, setQ] = useState("");
   const sort = useSort("total");
@@ -3533,6 +3621,7 @@ function PageClients({ route }) {
           { label: "Dépense moyenne", value: moyenne, f: fmt },
         ].map((s, i) => <div key={s.label} style={{ "--i": i }}><div className="label">{s.label}</div><div className="value"><CountUp value={s.value} format={s.f} /></div></div>)}
       </div>
+      {mode === "api" && <RepertoireCarte />}
       <div className="card">
         <div className="table-toolbar">
           <Tabs value={tab} onChange={setTab} tabs={[

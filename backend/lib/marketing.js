@@ -212,4 +212,4 @@ function verifierHebdo() {
 setInterval(() => db.pourChaqueEspace(verifierHebdo), 10 * 60 * 1000).unref();
 setTimeout(() => db.pourChaqueEspace(verifierHebdo), 15000).unref();
 
-module.exports = { MODELES, AUDIENCES, apercu, lancerCampagne, lireHebdo, ecrireHebdo, envoyerHebdo, destinataires, smsConfigure, emailConfigure, semaine };
+module.exports = { contexte, MODELES, AUDIENCES, apercu, lancerCampagne, lireHebdo, ecrireHebdo, envoyerHebdo, destinataires, smsConfigure, emailConfigure, semaine };
