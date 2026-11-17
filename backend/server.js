@@ -107,6 +107,9 @@ app.use("/api/boutique", boutiqueRoutes);
 app.use("/uploads", express.static(DOSSIER_UPLOADS, { maxAge: "30d", immutable: true, fallthrough: false }));
 
 // Le reste de l'API nécessite un utilisateur connecté.
+// Retour de la page d'autorisation Google (répertoire par l'adresse e-mail) — public, protégé par un jeton à usage unique
+app.get("/api/public/google/retour", clientsRoutes.retourGoogle);
+
 app.use("/api", authRequired);
 
 app.use("/api/clients", clientsRoutes);

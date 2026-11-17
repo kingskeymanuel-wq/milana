@@ -3516,9 +3516,21 @@ const numeroWa = (t) => { const d = String(t || "").replace(/\D/g, ""); return d
 function RepertoireCarte() {
   const { toast, rafraichir } = useApp();
   const [p, setP] = useState(null);
+  const [rep, setRep] = useState(null);
   const [ouvert, setOuvert] = useState(false);
+  const [email, setEmail] = useState("");
+  const [accord, setAccord] = useState(false);
+  const [rythme, setRythme] = useState(null);
   const charger = useCallback(() => apiFetch("GET", "/api/clients/prospection").then(setP).catch(() => setP({ erreur: true })), []);
-  useEffect(() => { charger(); }, [charger]);
+  const chargerRep = useCallback(() => apiFetch("GET", "/api/clients/repertoire").then((r) => { setRep(r); setRythme(r.rythme); if (r.accord?.email) setEmail(r.accord.email); }).catch(() => setRep({ erreur: true })), []);
+  useEffect(() => { charger(); chargerRep(); }, [charger, chargerRep]);
+  // Retour de la page d'autorisation de Google
+  useEffect(() => {
+    const g = new URLSearchParams((window.location.hash.split("?")[1] || "")).get("google");
+    if (g == null) return;
+    toast(g === "refuse" ? { title: "Accès au répertoire non autorisé", tone: "critical" } : g === "erreur" ? { title: "Lecture des contacts impossible", desc: "Réessayez dans un instant.", tone: "critical" } : { title: `${g} contact(s) ajouté(s) au répertoire`, desc: "Depuis votre compte Google." });
+    window.location.hash = "/clients";
+  }, [toast]);
 
   const importer = async (contacts) => {
     if (!contacts.length) return toast({ title: "Aucun numéro trouvé", tone: "critical" });
@@ -3536,14 +3548,25 @@ function RepertoireCarte() {
   };
   const fichier = async (e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) await importer(lireFichierContacts(await f.text())); };
   const marquer = async (id) => { await apiFetch("POST", `/api/clients/${id}/invite`); charger(); };
+  const google = async () => {
+    try { const r = await apiFetch("POST", "/api/clients/repertoire/google", { email, accord }); window.location.href = r.url; }
+    catch (e) { toast({ title: "Accès au répertoire", desc: e.message, tone: "critical" }); }
+  };
+  const retirerAccord = async () => { await apiFetch("DELETE", "/api/clients/repertoire/accord"); toast({ title: "Accord retiré" }); chargerRep(); };
+  const enregistrerRythme = async () => {
+    try { await apiFetch("PUT", "/api/clients/repertoire/rythme", rythme); toast({ title: "Rythme de prospection enregistré" }); await Promise.all([chargerRep(), charger()]); }
+    catch (e) { toast({ title: "Rythme", desc: e.message, tone: "critical" }); }
+  };
+  const basculerJour = (j) => setRythme((r) => ({ ...r, jours: r.jours.includes(j) ? r.jours.filter((x) => x !== j) : [...r.jours, j].sort() }));
 
   if (!p || p.erreur) return null;
+  const JOURS = [[1, "Lun"], [2, "Mar"], [3, "Mer"], [4, "Jeu"], [5, "Ven"], [6, "Sam"], [7, "Dim"]];
   return (
     <div className="card repertoire-boutique">
       <div className="repertoire-tete">
         <div>
           <div className="repertoire-titre">📇 Mon répertoire <span className="muted">· Agent Prospection</span></div>
-          <div className="muted">Vos contacts deviennent des clients potentiels : chaque jour, l'agent prépare {p.par_jour} invitations avec le lien de votre boutique. Vous les envoyez d'une touche sur WhatsApp.</div>
+          <div className="muted">Vos contacts deviennent des clients potentiels : à votre rythme, l'agent prépare des invitations avec le lien de votre boutique. Vous les envoyez d'une touche sur WhatsApp.</div>
         </div>
         <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
           <Btn variant="primary" icon={Smartphone} onClick={synchroniser} disabled={!contactsDuTelephone()} title={contactsDuTelephone() ? "" : "Disponible sur Android avec Chrome"}>Synchroniser mes contacts</Btn>
@@ -3556,7 +3579,37 @@ function RepertoireCarte() {
         <div><b>{p.restants}</b><span>à inviter</span></div>
         <div><b>{p.invites_aujourdhui}/{p.par_jour}</b><span>invitations aujourd'hui</span></div>
       </div>
-      {!contactsDuTelephone() && <div className="muted repertoire-aide">Sur iPhone : app Contacts → sélectionner → Partager → fichier .vcf. Google Contacts : Exporter → vCard. Les contacts WhatsApp sont ceux de votre téléphone. Facebook ne partage pas les numéros : publiez plutôt le lien de votre boutique sur votre page.</div>}
+
+      {rep && !rep.erreur && (
+        <div className="repertoire-google">
+          <div className="repertoire-titre">✉️ Par votre adresse e-mail <span className="muted">· facultatif</span></div>
+          <div className="muted">Votre téléphone Android enregistre vos contacts dans votre compte Google. Entrez cette adresse : sur la page de Google, vous autorisez une lecture unique de vos contacts. Ils rejoignent votre répertoire, et l'accès est rendu aussitôt. Vous pouvez retirer votre accord à tout moment (voir la <a href="/confidentialite.html" target="_blank" rel="noopener">politique de confidentialité</a>).</div>
+          {rep.accord?.le && <div className="repertoire-accord">Accord donné le {fmtDate(rep.accord.le.slice(0, 10))}{rep.dernier ? ` · dernier import : ${rep.dernier.ajoutes} contact(s) ajouté(s) sur ${rep.dernier.lus} lus` : ""} · <button className="repertoire-bascule" onClick={retirerAccord}>Retirer mon accord</button></div>}
+          {rep.google ? (
+            <div className="repertoire-form">
+              <input className="input" type="email" placeholder="vous@gmail.com" value={email} onChange={(e) => setEmail(e.target.value)} />
+              <label className="repertoire-case"><input type="checkbox" checked={accord} onChange={(e) => setAccord(e.target.checked)} /> J'autorise la lecture de mes contacts pour que l'agent leur propose, à mon rythme, un lien vers ma boutique.</label>
+              <Btn variant="primary" onClick={google} disabled={!accord || !email.includes("@")}>Autoriser l'accès à mon répertoire</Btn>
+            </div>
+          ) : <div className="muted">Bientôt disponible : utilisez en attendant « Synchroniser mes contacts » ou « Importer un fichier ».</div>}
+        </div>
+      )}
+
+      {rythme && (
+        <div className="repertoire-google">
+          <div className="repertoire-titre">⏱ Rythme de prospection</div>
+          <div className="muted">{p.fenetre?.ouverte ? "En ce moment : invitations ouvertes." : p.fenetre ? `Invitations en pause · reprise ${p.fenetre.reprise}.` : ""} L'agent ne prépare des invitations que les jours et aux heures que vous choisissez.</div>
+          <div className="repertoire-jours">{JOURS.map(([j, l]) => <button key={j} type="button" className={rythme.jours.includes(j) ? "actif" : ""} onClick={() => basculerJour(j)}>{l}</button>)}</div>
+          <div className="repertoire-form">
+            <label>De <select className="input" value={rythme.debut} onChange={(e) => setRythme({ ...rythme, debut: +e.target.value })}>{Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{h} h</option>)}</select></label>
+            <label>à <select className="input" value={rythme.fin} onChange={(e) => setRythme({ ...rythme, fin: +e.target.value })}>{Array.from({ length: 24 }, (_, h) => h + 1).map((h) => <option key={h} value={h}>{h} h</option>)}</select></label>
+            <label>Invitations par jour <select className="input" value={rythme.par_jour} onChange={(e) => setRythme({ ...rythme, par_jour: +e.target.value })}>{[3, 5, 10, 15, 20, 30].map((n) => <option key={n} value={n}>{n}</option>)}</select></label>
+            <Btn onClick={enregistrerRythme}>Enregistrer le rythme</Btn>
+          </div>
+        </div>
+      )}
+
+      {!contactsDuTelephone() && <div className="muted repertoire-aide">Sur iPhone : app Contacts → sélectionner → Partager → fichier .vcf. Google Contacts : Exporter → vCard. Facebook ne partage pas les numéros : publiez plutôt le lien de votre boutique sur votre page.</div>}
       {p.du_jour.length > 0 ? (
         <>
           <button className="repertoire-bascule" onClick={() => setOuvert(!ouvert)}>{ouvert ? "Masquer" : "Voir"} les {p.du_jour.length} invitation(s) du jour</button>
@@ -3569,10 +3622,11 @@ function RepertoireCarte() {
             </div>
           ))}</div>}
         </>
-      ) : <div className="muted repertoire-aide">{p.repertoire ? (p.restants ? "Invitations du jour envoyées. Les suivantes arrivent demain." : "Tous vos contacts ont été invités. Ajoutez-en d'autres pour continuer.") : "Ajoutez vos contacts pour que l'agent commence."}</div>}
+      ) : <div className="muted repertoire-aide">{p.repertoire ? (p.fenetre && !p.fenetre.ouverte ? `Les prochaines invitations seront prêtes ${p.fenetre.reprise}.` : p.restants ? "Invitations du jour envoyées. Les suivantes arrivent demain." : "Tous vos contacts ont été invités. Ajoutez-en d'autres pour continuer.") : "Ajoutez vos contacts pour que l'agent commence."}</div>}
     </div>
   );
 }
+
 
 function PageClients({ route }) {
   const { data, go, toast, mode } = useApp();
